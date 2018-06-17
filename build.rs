@@ -31,14 +31,15 @@ impl Drop for TempPath {
     }
 }
 
-fn find_library(names: &[&str]) -> Option<Library> {
+fn find_library<'a>(names: &[&'a str]) -> (&'a str, Option<Library>) {
     for name in names {
         if let Ok(lib) = pkg_config::probe_library(name) {
-            return Some(lib);
+            return (name, Some(lib));
         }
     }
-    println!("cargo:rustc-link-lib={}", names.last().unwrap());
-    None
+    let name = &names.last().unwrap();
+    println!("cargo:rustc-link-lib={}", name);
+    (name, None)
 }
 
 fn main() {
@@ -47,40 +48,83 @@ fn main() {
     } else {
         find_library(&["ncursesw5", "ncursesw"])
     };
-
-    generate_chtype_rs(&ncurses_lib);
+    generate_ncurses_link_rs(&ncurses_lib);
+    generate_int_const_rs("c_int", "ERR", "d", b"#include <ncurses.h>
+", &[&ncurses_lib]);
+    generate_int_type_rs(false, "chtype", b"#include <ncurses.h>
+", &[&ncurses_lib]);
+    generate_int_type_rs(true, "wint_t", b"#include <wchar.h>
+", &[]);
+    generate_int_const_rs("c_int", "KEY_CODE_YES", "d", b"#include <ncurses.h>
+", &[&ncurses_lib]);
 }
 
-fn generate_chtype_rs(ncurses_lib: &Option<Library>) {
+fn generate_ncurses_link_rs(ncurses_lib: &(&str, Option<Library>)) {
     let out_dir = env::var("OUT_DIR").expect("cannot get OUT_DIR");
-    let src = TempPath::new(Path::new(&out_dir).join("size_of_chtype.c"));
-    let bin = TempPath::new(Path::new(&out_dir).join("size_of_chtype.out"));
+    let ncurses_link_rs = Path::new(&out_dir).join("ncurses_link.rs");
+    let mut f = File::create(&ncurses_link_rs).unwrap();
+    f.write_all(b"#[link(name = \"").unwrap();
+    f.write_all(ncurses_lib.0.as_bytes()).unwrap();
+    f.write_all(b"\")]
+extern { }
+").unwrap();
+}
 
-    let mut fp = File::create(&src.path).expect(&format!("cannot open {}", &src.path.display()));
-    fp.write_all(b"#include <limits.h>
-#include <stdio.h>
-#include <ncurses.h>
+fn generate_int_type_rs(is_signed: bool, type_name: &str, includes: &[u8], libs: &[&(&str, Option<Library>)]) {
+    let size = from_c_code(type_name, &[ includes, b"#include <stdio.h>
+#include <limits.h>
 
 int main(void) {
-    printf(\"%zu\", sizeof(chtype) * CHAR_BIT);
+    printf(\"%zu\", sizeof(", &type_name.as_bytes(), b") * CHAR_BIT);
     return 0;
 }
-").expect(&format!("cannot write into {}", &src.path().display()));
+" ], libs);
+    generate_rs(type_name, &[ b"type ", type_name.as_bytes(), b" = ", if is_signed { b"i" } else { b"u" }, &size, b";
+" ]);
+}
+
+fn generate_int_const_rs(type_name: &str, const_name: &str, printf: &str, includes: &[u8], libs: &[&(&str, Option<Library>)]) {
+    let value = from_c_code(const_name, &[ includes, b"#include <stdio.h>
+
+int main(void) {
+    printf(\"%", printf.as_bytes(), b"\", ", const_name.as_bytes(), b");
+    return 0;
+}
+" ], libs);
+    generate_rs(const_name, &[ b"const ", const_name.as_bytes(), b": ", type_name.as_bytes(), b" = ", &value, b";
+" ]);
+}
+
+fn generate_rs(name: &str, code: &[&[u8]]) {
+    let out_dir = env::var("OUT_DIR").expect("cannot get OUT_DIR");
+    let rs = Path::new(&out_dir).join(format!("{}.rs", name));
+    let mut rs = File::create(&rs).unwrap();
+    for code_part in code {
+        rs.write_all(code_part).unwrap();
+    }
+}
+
+fn from_c_code(name: &str, c_code: &[&[u8]], libs: &[&(&str, Option<Library>)]) -> Vec<u8> {
+    let out_dir = env::var("OUT_DIR").expect("cannot get OUT_DIR");
+    let src = TempPath::new(Path::new(&out_dir).join(&format!("{}.c", name)));
+    let bin = TempPath::new(Path::new(&out_dir).join(&format!("{}.out", name)));
+
+    let mut fp = File::create(&src.path).expect(&format!("cannot open {}", &src.path.display()));
+    for c_code_part in c_code {
+        fp.write_all(c_code_part).expect(&format!("cannot write into {}", &src.path().display()));
+    }
 
     let compiler = gcc::Build::new().get_compiler();
     let mut compile_cmd = Command::new(compiler.path());
     compile_cmd.arg(&src.path()).arg("-o").arg(&bin.path());
-    if let &Some(ref lib) = ncurses_lib {
-        for path in lib.include_paths.iter() {
-            compile_cmd.arg("-I").arg(path);
+    for &lib in libs {
+        if let Some(ref lib) = lib.1 {
+            for path in lib.include_paths.iter() {
+                compile_cmd.arg("-I").arg(path);
+            }
         }
     }
     compile_cmd.status().expect("compilation failed");
-    let chtype_size = Command::new(&bin.path()).output().unwrap();
-    let dest_path = Path::new(&out_dir).join("chtype.rs");
-    let mut f = File::create(&dest_path).unwrap();
-    f.write_all(b"pub type chtype = u").unwrap();
-    f.write_all(&chtype_size.stdout).unwrap();
-    f.write_all(b";
-").unwrap();
+    let output = Command::new(&bin.path()).output().unwrap();
+    output.stdout
 }

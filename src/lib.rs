@@ -1,60 +1,87 @@
+extern crate libc;
+extern crate either;
+
+use std::os::raw::{ c_int, c_void };
+use libc::{ wchar_t };
+use either::{ Either, Left, Right };
+
+include!(concat!(env!("OUT_DIR"), "/ERR.rs"));
 include!(concat!(env!("OUT_DIR"), "/chtype.rs"));
+include!(concat!(env!("OUT_DIR"), "/wint_t.rs"));
+include!(concat!(env!("OUT_DIR"), "/KEY_CODE_YES.rs"));
 
-use std::os::raw::{ c_int };
+type WINDOW = c_void;
 
-//use curses_sys::{ WINDOW, chtype, initscr, endwin, waddchnstr, wmove, wrefresh, wgetch };
+extern "C" {
+    fn initscr() -> *mut WINDOW;
+    fn endwin() -> c_int;
+    fn wrefresh(w: *mut WINDOW) -> c_int;
+    fn wmove(w: *mut WINDOW, y: c_int, x: c_int) -> c_int;
+    fn waddchnstr(w: *mut WINDOW, chstr: *const chtype, n: c_int) -> c_int;
+    fn wget_wch(w: *mut WINDOW, c: *mut wint_t) -> c_int;
+}
 
-//fn p_check<T>(p: *mut T) -> Result<*mut T, ()> {
-    //if p.is_null() { Err(())} else { Ok(p) }
-//}
+trait Checkable where Self: std::marker::Sized {
+    fn is_err(&self) -> bool;
+    fn check(self) -> Result<Self, ()> {
+        if self.is_err() { Err(()) } else { Ok(self) }
+    }
+}
 
-//fn check(i: c_int) -> Result<(), ()> {
-    //if i == -1 { Err(()) } else { Ok(()) }
-//}
+impl<T> Checkable for *mut T {
+    fn is_err(&self) -> bool {
+        self.is_null()
+    }
+}
 
-//struct Scr {
-    //ptr: *mut WINDOW,
-//}
+impl Checkable for c_int {
+    fn is_err(&self) -> bool {
+        *self == ERR
+    }
+}
 
-//impl Scr {
-    //fn new() -> Result<Scr, ()> {
-        //let p = p_check(unsafe { initscr() })?;
-        //Ok(Scr { ptr: p })
-    //}
-    //fn patch(&self, diffs: &[(c_int, c_int, &[chtype])]) -> Result<(), ()> {
-        //for &(y, x, s) in diffs {
-            //check(unsafe { wmove(self.ptr, y, x) })?;
-            //check(unsafe { waddchnstr(self.ptr, s.as_ptr(), s.len() as c_int) })?;
+struct Scr {
+    ptr: *mut WINDOW,
+}
 
-        //}
-        //Ok(())
-    //}
-    //fn refresh(&self) -> Result<(), ()> {
-        //check(unsafe { wrefresh(self.ptr) })
-    //}
-    //fn getch(&self) -> Option<c_int> {
-        //let c = unsafe { wgetch(self.ptr) };
-        //if c == -1 { None } else { Some(c) }
-    //}
-//}
+impl Scr {
+    fn new() -> Result<Scr, ()> {
+        let p = unsafe { initscr() }.check()?;
+        Ok(Scr { ptr: p })
+    }
+    fn patch(&self, diffs: &[(c_int, c_int, &[chtype])]) -> Result<(), ()> {
+        for &(y, x, s) in diffs {
+            unsafe { wmove(self.ptr, y, x) }.check()?;
+            unsafe { waddchnstr(self.ptr, s.as_ptr(), s.len() as c_int) }.check()?;
+        }
+        Ok(())
+    }
+    fn refresh(&self) -> Result<(), ()> {
+        unsafe { wrefresh(self.ptr) }.check()?;
+        Ok(())
+    }
+    fn getch(&self) -> Result<Either<c_int, wchar_t>, ()> {
+        let mut c: wint_t = 0;
+        let r = unsafe { wget_wch(self.ptr, c as *mut wint_t) }.check()?;
+        if r == KEY_CODE_YES as wint_t { Ok(Left(c as c_int)) } else { Ok(Right(c as wchar_t)) }
+    }
+}
 
-//impl Drop for Scr {
-    //fn drop(&mut self) {
-        //unsafe { endwin(); }
-    //}
-//}
-
-
+impl Drop for Scr {
+    fn drop(&mut self) {
+        unsafe { endwin(); }
+    }
+}
 
 #[cfg(test)]
 mod tests {
-//    use Scr;
+    use Scr;
 
     #[test]
     fn it_works() {
-        //let scr = Scr::new().unwrap();
-        //scr.patch(&[(6, 1, &[65, 66, 67])]).unwrap();
-        //scr.refresh().unwrap();
-        //scr.getch();
+        let scr = Scr::new().unwrap();
+        scr.patch(&[(6, 1, &[65, 66, 67])]).unwrap();
+        scr.refresh().unwrap();
+        scr.getch();
     }
 }
