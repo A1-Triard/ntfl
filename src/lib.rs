@@ -16,6 +16,7 @@ type WINDOW = c_void;
 extern "C" {
     fn initscr() -> *mut WINDOW;
     fn endwin() -> c_int;
+    fn noecho() -> c_int;
     fn wrefresh(w: *mut WINDOW) -> c_int;
     fn wmove(w: *mut WINDOW, y: c_int, x: c_int) -> c_int;
     fn waddchnstr(w: *mut WINDOW, chstr: *const chtype, n: c_int) -> c_int;
@@ -48,6 +49,7 @@ pub struct Scr {
 impl Scr {
     pub fn new() -> Result<Scr, ()> {
         let p = unsafe { initscr() }.check()?;
+        unsafe { noecho() }.check()?;
         Ok(Scr { ptr: p })
     }
     pub fn patch(&self, diffs: &[(c_int, c_int, &[chtype])]) -> Result<(), ()> {
