@@ -1,3 +1,4 @@
+#![deny(warnings)]
 extern crate libc;
 extern crate either;
 
@@ -40,28 +41,28 @@ impl Checkable for c_int {
     }
 }
 
-struct Scr {
+pub struct Scr {
     ptr: *mut WINDOW,
 }
 
 impl Scr {
-    fn new() -> Result<Scr, ()> {
+    pub fn new() -> Result<Scr, ()> {
         let p = unsafe { initscr() }.check()?;
         Ok(Scr { ptr: p })
     }
-    fn patch(&self, diffs: &[(c_int, c_int, &[chtype])]) -> Result<(), ()> {
+    pub fn patch(&self, diffs: &[(c_int, c_int, &[chtype])]) -> Result<(), ()> {
         for &(y, x, s) in diffs {
             unsafe { wmove(self.ptr, y, x) }.check()?;
             unsafe { waddchnstr(self.ptr, s.as_ptr(), s.len() as c_int) }.check()?;
         }
         Ok(())
     }
-    fn refresh(&self) -> Result<(), ()> {
+    pub fn refresh(&self) -> Result<(), ()> {
         unsafe { wrefresh(self.ptr) }.check()?;
         Ok(())
     }
-    fn getch(&self) -> Result<Either<c_int, wchar_t>, ()> {
-        let mut c: wint_t = 0;
+    pub fn getch(&self) -> Result<Either<c_int, wchar_t>, ()> {
+        let c: wint_t = 0;
         let r = unsafe { wget_wch(self.ptr, c as *mut wint_t) }.check()?;
         if r == KEY_CODE_YES as wint_t { Ok(Left(c as c_int)) } else { Ok(Right(c as wchar_t)) }
     }
@@ -82,6 +83,9 @@ mod tests {
         let scr = Scr::new().unwrap();
         scr.patch(&[(6, 1, &[65, 66, 67])]).unwrap();
         scr.refresh().unwrap();
-        scr.getch();
+        scr.getch().unwrap();
+        scr.patch(&[(6, 2, &[32])]).unwrap();
+        scr.refresh().unwrap();
+        scr.getch().unwrap();
     }
 }

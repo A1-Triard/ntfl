@@ -1,10 +1,11 @@
+#![deny(warnings)]
 extern crate gcc;
 extern crate pkg_config;
 
 use pkg_config::Library;
 use std::env;
 use std::fs::{ File, remove_file };
-use std::io::{ Write, Error, ErrorKind };
+use std::io::{ Write, ErrorKind };
 use std::path::{ Path, PathBuf };
 use std::process::Command;
 
@@ -79,7 +80,8 @@ int main(void) {
     return 0;
 }
 " ], libs);
-    generate_rs(type_name, &[ b"type ", type_name.as_bytes(), b" = ", if is_signed { b"i" } else { b"u" }, &size, b";
+    generate_rs(type_name, &[ b"#[allow(non_camel_case_types)]
+type ", type_name.as_bytes(), b" = ", if is_signed { b"i" } else { b"u" }, &size, b";
 " ]);
 }
 
