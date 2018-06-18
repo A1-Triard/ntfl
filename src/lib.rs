@@ -27,6 +27,7 @@ extern "C" {
     fn getmaxx(w: *mut WINDOW) -> c_int;
     fn getmaxy(w: *mut WINDOW) -> c_int;
     fn start_color() -> c_int;
+    fn use_default_colors() -> c_int;
     fn keypad(w: *mut WINDOW, bf: c_bool) -> c_int;
 }
 
@@ -58,6 +59,7 @@ impl Scr {
         unsafe { setlocale(LC_ALL, "\0".as_ptr() as *const c_char) };
         let p = unsafe { initscr() }.check()?;
         unsafe { start_color() }.check()?;
+        unsafe { use_default_colors() }.check()?;
         unsafe { noecho() }.check()?;
         unsafe { keypad(p, 1) }.check()?;
         Ok(Scr { ptr: p })
