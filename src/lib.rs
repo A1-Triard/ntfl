@@ -27,8 +27,10 @@ extern "C" {
     fn getmaxx(w: *mut WINDOW) -> c_int;
     fn getmaxy(w: *mut WINDOW) -> c_int;
     fn start_color() -> c_int;
-    fn use_default_colors() -> c_int;
+    fn assume_default_colors(fg: c_int, bg: c_int) -> c_int;
     fn keypad(w: *mut WINDOW, bf: c_bool) -> c_int;
+    fn COLOR_PAIR(n: c_int) -> c_int;
+    fn init_pair(pair: c_short, f: c_short, b: c_short) -> c_int;
 }
 
 trait Checkable where Self: std::marker::Sized {
@@ -54,12 +56,48 @@ pub struct Scr {
     ptr: *mut WINDOW,
 }
 
+#[repr(i8)]
+pub enum Color {
+    Black = 0,
+    Red = 1,
+    Green = 2,
+    Yellow = 3,
+    Blue = 4,
+    Magenta = 5,
+    Cyan = 6,
+    White = 7,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Attr {
+    value: attr_t,
+}
+
+impl Attr {
+    pub fn color(fg: Color, bg: Option<Color>) -> Attr {
+        let bg = match bg {
+            Some(c) => 1 + (c as i8 as c_int),
+            None => 0
+        };
+        let n = (bg << 3) | (fg as i8 as c_int);
+        Attr { value: unsafe { COLOR_PAIR(n) } as attr_t }
+    }
+}
+
 impl Scr {
     pub fn new() -> Result<Scr, ()> {
         unsafe { setlocale(LC_ALL, "\0".as_ptr() as *const c_char) };
         let p = unsafe { initscr() }.check()?;
         unsafe { start_color() }.check()?;
-        unsafe { use_default_colors() }.check()?;
+        for bg in -1 .. 7 {
+        for fg in 0 .. 7 {
+            if fg == 0 && bg == -1 {
+                unsafe { assume_default_colors(0, -1) }
+            } else {
+                unsafe { init_pair(((1 + bg) << 3) | fg, fg, bg) }
+            }.check()?;
+        }
+        }
         unsafe { noecho() }.check()?;
         unsafe { keypad(p, 1) }.check()?;
         Ok(Scr { ptr: p })
