@@ -50,9 +50,11 @@ fn main() {
         find_library(&["ncursesw5", "ncursesw"])
     };
     generate_ncurses_link_rs(&ncurses_lib);
+    generate_int_type_rs(false, "c_bool", "bool", b"#include <ncurses.h>
+", &[&ncurses_lib]);
     generate_int_const_rs("c_int", "ERR", "d", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
-    generate_int_type_rs(false, "attr_t", b"#include <ncurses.h>
+    generate_int_type_rs(false, "attr_t", "attr_t", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
     generate_int_const_rs("c_uint", "KEY_CODE_YES", "d", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
@@ -69,7 +71,7 @@ extern { }
 ").unwrap();
 }
 
-fn generate_int_type_rs(is_signed: bool, type_name: &str, includes: &[u8], libs: &[&(&str, Option<Library>)]) {
+fn generate_int_type_rs(is_signed: bool, rs_type_name: &str, type_name: &str, includes: &[u8], libs: &[&(&str, Option<Library>)]) {
     let size = from_c_code(type_name, &[ includes, b"#include <stdio.h>
 #include <limits.h>
 
@@ -78,8 +80,8 @@ int main(void) {
     return 0;
 }
 " ], libs);
-    generate_rs(type_name, &[ b"#[allow(non_camel_case_types)]
-type ", type_name.as_bytes(), b" = ", if is_signed { b"i" } else { b"u" }, &size, b";
+    generate_rs(rs_type_name, &[ b"#[allow(non_camel_case_types)]
+type ", rs_type_name.as_bytes(), b" = ", if is_signed { b"i" } else { b"u" }, &size, b";
 " ]);
 }
 

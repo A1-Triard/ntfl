@@ -8,6 +8,7 @@ use std::ptr::null;
 use either::{ Either, Left, Right };
 use libc::{ setlocale, LC_ALL };
 
+include!(concat!(env!("OUT_DIR"), "/c_bool.rs"));
 include!(concat!(env!("OUT_DIR"), "/ERR.rs"));
 include!(concat!(env!("OUT_DIR"), "/attr_t.rs"));
 include!(concat!(env!("OUT_DIR"), "/KEY_CODE_YES.rs"));
@@ -25,6 +26,8 @@ extern "C" {
     fn wgetch(w: *mut WINDOW) -> c_int;
     fn getmaxx(w: *mut WINDOW) -> c_int;
     fn getmaxy(w: *mut WINDOW) -> c_int;
+    fn start_color() -> c_int;
+    fn keypad(w: *mut WINDOW, bf: c_bool) -> c_int;
 }
 
 trait Checkable where Self: std::marker::Sized {
@@ -54,7 +57,9 @@ impl Scr {
     pub fn new() -> Result<Scr, ()> {
         unsafe { setlocale(LC_ALL, "\0".as_ptr() as *const c_char) };
         let p = unsafe { initscr() }.check()?;
+        unsafe { start_color() }.check()?;
         unsafe { noecho() }.check()?;
+        unsafe { keypad(p, 1) }.check()?;
         Ok(Scr { ptr: p })
     }
     pub fn get_max_x(&self) -> Result<c_int, ()> {
