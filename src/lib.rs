@@ -2,7 +2,7 @@
 extern crate libc;
 extern crate either;
 
-use std::char::from_u32_unchecked;
+use std::char::from_u32;
 use std::os::raw::{ c_int, c_void, c_short, c_char, c_uint };
 use std::ptr::null;
 use either::{ Either, Left, Right };
@@ -107,7 +107,10 @@ impl Scr {
             if bi & KEY_CODE_YES != 0 { return Err(()); }
             Ok(bi as u8)
         })?;
-        Ok(Right(unsafe { from_u32_unchecked(c) }))
+        match from_u32(c) {
+            Some(x) => Ok(Right(x)),
+            None => Err(())
+        }
     }
 }
 
