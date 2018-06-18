@@ -21,7 +21,6 @@ extern "C" {
     fn noecho() -> c_int;
     fn wrefresh(w: *mut WINDOW) -> c_int;
     fn wmove(w: *mut WINDOW, y: c_int, x: c_int) -> c_int;
-    fn wchgat(w: *mut WINDOW, n: c_int, attr: attr_t, pair: c_short, opts: *const c_void) -> c_int;
     fn waddnstr(w: *mut WINDOW, s: *const c_char, n: c_int) -> c_int;
     fn wgetch(w: *mut WINDOW) -> c_int;
     fn getmaxx(w: *mut WINDOW) -> c_int;
@@ -29,8 +28,8 @@ extern "C" {
     fn start_color() -> c_int;
     fn assume_default_colors(fg: c_int, bg: c_int) -> c_int;
     fn keypad(w: *mut WINDOW, bf: c_bool) -> c_int;
-    fn COLOR_PAIR(n: c_int) -> c_int;
     fn init_pair(pair: c_short, f: c_short, b: c_short) -> c_int;
+    fn wattr_set(w: *mut WINDOW, attrs: attr_t, pair: c_short, opts: *const c_void) -> c_int;
 }
 
 trait Checkable where Self: std::marker::Sized {
@@ -68,21 +67,13 @@ pub enum Color {
     White = 7,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Attr {
-    value: attr_t,
-}
+//#[derive(Debug, Copy, Clone)]
+//pub struct Attr {
+    //value: attr_t,
+//}
 
-impl Attr {
-    pub fn color(fg: Color, bg: Option<Color>) -> Attr {
-        let bg = match bg {
-            Some(c) => 1 + (c as i8 as c_int),
-            None => 0
-        };
-        let n = (bg << 3) | (fg as i8 as c_int);
-        Attr { value: unsafe { COLOR_PAIR(n) } as attr_t }
-    }
-}
+//impl Attr {
+//}
 
 impl Scr {
     pub fn new() -> Result<Scr, ()> {
@@ -110,13 +101,21 @@ impl Scr {
     }
     pub fn patch<D, C>(&self, diffs: D) -> Result<(), ()>
         where D : Iterator<Item=(c_int, c_int, C)>
-            , C : Iterator<Item=(char, attr_t, c_int)> {
+            , C : Iterator<Item=(char, attr_t, Color, Option<Color>)> {
+
+        fn color_pair(fg: Color, bg: Option<Color>) -> c_short {
+            let bg = match bg {
+                Some(c) => 1 + (c as i8 as c_short),
+                None => 0
+            };
+            (bg << 3) | (fg as i8 as c_short)
+        }
 
         for (y, x, s) in diffs {
             let mut xi = x;
-            for (c, attr, pair) in s {
+            for (c, attr, fg, bg) in s {
                 unsafe { wmove(self.ptr, y, xi) }.check()?;
-                unsafe { wchgat(self.ptr, 1, attr, pair as c_short, null()) }.check()?;
+                unsafe { wattr_set(self.ptr, attr, color_pair(fg, bg), null()) }.check()?;
                 let mut b = [0; 6];
                 let b = c.encode_utf8(&mut b);
                 unsafe { waddnstr(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
@@ -176,16 +175,17 @@ impl Drop for Scr {
 #[cfg(test)]
 mod tests {
     use Scr;
+    use Color;
     use either::{ Left, Right };
 
     #[test]
     fn it_works() {
         let scr = Scr::new().unwrap();
-        scr.patch(Some((6, 1, "ABc".chars().map(|p| (p, 0, 0)))).into_iter()).unwrap();
+        scr.patch(Some((6, 1, "ABc".chars().map(|p| (p, 0, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
         scr.refresh().unwrap();
         match scr.getch().unwrap() {
             Left(_) => { }
-            Right(c) => { scr.patch(Some((6, 2, Some((c, 0, 0)).into_iter())).into_iter()).unwrap(); }
+            Right(c) => { scr.patch(Some((6, 2, Some((c, 0, Color::Red, Some(Color::Black))).into_iter())).into_iter()).unwrap(); }
         }
         scr.refresh().unwrap();
         scr.getch().unwrap();
