@@ -112,25 +112,6 @@ impl Scr {
         unsafe { curs_set(0) };
         Ok(Scr { ptr: p, cursor_is_visible: false })
     }
-    pub fn cursor(&mut self, p: Option<(c_int, c_int)>) -> Result<(), ()> {
-        match p {
-            None => {
-                if self.cursor_is_visible {
-                    unsafe { curs_set(0); }
-                    self.cursor_is_visible = false;
-                }
-                Ok(())
-            },
-            Some((y, x)) => {
-                if !self.cursor_is_visible {
-                    unsafe { curs_set(1); }
-                    self.cursor_is_visible = true;
-                }
-                unsafe { wmove(self.ptr, y, x) }.check()?;
-                Ok(())
-            }
-        }
-    }
     pub fn get_width(&self) -> Result<c_int, ()> {
         unsafe { getmaxx(self.ptr) }.check()
     }
@@ -165,7 +146,22 @@ impl Scr {
         }
         Ok(())
     }
-    pub fn refresh(&mut self) -> Result<(), ()> {
+    pub fn refresh(&mut self, cursor: Option<(c_int, c_int)>) -> Result<(), ()> {
+        match cursor {
+            None => {
+                if self.cursor_is_visible {
+                    unsafe { curs_set(0); }
+                    self.cursor_is_visible = false;
+                }
+            },
+            Some((y, x)) => {
+                if !self.cursor_is_visible {
+                    unsafe { curs_set(1); }
+                    self.cursor_is_visible = true;
+                }
+                unsafe { wmove(self.ptr, y, x) }.check()?;
+            }
+        }
         unsafe { wrefresh(self.ptr) }.check()?;
         Ok(())
     }
@@ -225,12 +221,12 @@ mod tests {
         let mut scr = Scr::new().unwrap();
         scr.patch(Some((6, 133, "ABc".chars().map(|p| (p, Attr::NORMAL, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
         scr.patch(Some((8, 133, Some(('l', Attr::ALTCHARSET | Attr::REVERSE, Color::Green, Some(Color::Black))).into_iter())).into_iter()).unwrap();
-        scr.refresh().unwrap();
+        scr.refresh(Some((5, 5))).unwrap();
         match scr.getch().unwrap() {
             Left(_) => { }
             Right(c) => { scr.patch(Some((6, 2, Some((c, Attr::UNDERLINE, Color::Red, Some(Color::Black))).into_iter())).into_iter()).unwrap(); }
         }
-        scr.refresh().unwrap();
+        scr.refresh(None).unwrap();
         scr.getch().unwrap();
     }
 }
