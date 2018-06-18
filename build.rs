@@ -52,11 +52,9 @@ fn main() {
     generate_ncurses_link_rs(&ncurses_lib);
     generate_int_const_rs("c_int", "ERR", "d", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
-    generate_int_type_rs(false, "chtype", b"#include <ncurses.h>
+    generate_int_type_rs(false, "attr_t", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
-    generate_int_type_rs(true, "wint_t", b"#include <wchar.h>
-", &[]);
-    generate_int_const_rs("c_int", "KEY_CODE_YES", "d", b"#include <ncurses.h>
+    generate_int_const_rs("c_uint", "KEY_CODE_YES", "d", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
 }
 
