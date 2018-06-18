@@ -33,6 +33,7 @@ extern "C" {
     fn keypad(w: *mut WINDOW, bf: c_bool) -> c_int;
     fn init_pair(pair: c_short, f: c_short, b: c_short) -> c_int;
     fn wattr_set(w: *mut WINDOW, attrs: attr_t, pair: c_short, opts: *const c_void) -> c_int;
+    fn curs_set(visibility: c_int) -> c_int;
 }
 
 trait Checkable where Self: std::marker::Sized {
@@ -56,6 +57,7 @@ impl Checkable for c_int {
 
 pub struct Scr {
     ptr: *mut WINDOW,
+    cursor_is_visible: bool,
 }
 
 #[repr(i8)]
@@ -107,7 +109,27 @@ impl Scr {
         }
         unsafe { noecho() }.check()?;
         unsafe { keypad(p, 1) }.check()?;
-        Ok(Scr { ptr: p })
+        unsafe { curs_set(0) };
+        Ok(Scr { ptr: p, cursor_is_visible: false })
+    }
+    pub fn cursor(&mut self, p: Option<(c_int, c_int)>) -> Result<(), ()> {
+        match p {
+            None => {
+                if self.cursor_is_visible {
+                    unsafe { curs_set(0); }
+                    self.cursor_is_visible = false;
+                }
+                Ok(())
+            },
+            Some((y, x)) => {
+                if !self.cursor_is_visible {
+                    unsafe { curs_set(1); }
+                    self.cursor_is_visible = true;
+                }
+                unsafe { wmove(self.ptr, y, x) }.check()?;
+                Ok(())
+            }
+        }
     }
     pub fn get_width(&self) -> Result<c_int, ()> {
         unsafe { getmaxx(self.ptr) }.check()
@@ -115,7 +137,7 @@ impl Scr {
     pub fn get_height(&self) -> Result<c_int, ()> {
         unsafe { getmaxy(self.ptr) }.check()
     }
-    pub fn patch<D, C>(&self, diffs: D) -> Result<(), ()>
+    pub fn patch<D, C>(&mut self, diffs: D) -> Result<(), ()>
         where D : Iterator<Item=(c_int, c_int, C)>
             , C : Iterator<Item=(char, Attr, Color, Option<Color>)> {
 
@@ -143,11 +165,11 @@ impl Scr {
         }
         Ok(())
     }
-    pub fn refresh(&self) -> Result<(), ()> {
+    pub fn refresh(&mut self) -> Result<(), ()> {
         unsafe { wrefresh(self.ptr) }.check()?;
         Ok(())
     }
-    pub fn getch(&self) -> Result<Either<c_uint, char>, ()> {
+    pub fn getch(&mut self) -> Result<Either<c_uint, char>, ()> {
         fn read_u8_tail<G>(b0: u8, g: &G) -> Result<u32, ()> where G : Fn() -> Result<u8, ()> {
             let next = || -> Result<u8, ()> {
                 let bi = g()?;
@@ -200,7 +222,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let scr = Scr::new().unwrap();
+        let mut scr = Scr::new().unwrap();
         scr.patch(Some((6, 133, "ABc".chars().map(|p| (p, Attr::NORMAL, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
         scr.patch(Some((8, 133, Some(('l', Attr::ALTCHARSET | Attr::REVERSE, Color::Green, Some(Color::Black))).into_iter())).into_iter()).unwrap();
         scr.refresh().unwrap();
