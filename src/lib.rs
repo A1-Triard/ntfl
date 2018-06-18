@@ -23,6 +23,8 @@ extern "C" {
     fn wchgat(w: *mut WINDOW, n: c_int, attr: attr_t, pair: c_short, opts: *const c_void) -> c_int;
     fn waddnstr(w: *mut WINDOW, s: *const c_char, n: c_int) -> c_int;
     fn wgetch(w: *mut WINDOW) -> c_int;
+    fn getmaxx(w: *mut WINDOW) -> c_int;
+    fn getmaxy(w: *mut WINDOW) -> c_int;
 }
 
 trait Checkable where Self: std::marker::Sized {
@@ -54,6 +56,12 @@ impl Scr {
         let p = unsafe { initscr() }.check()?;
         unsafe { noecho() }.check()?;
         Ok(Scr { ptr: p })
+    }
+    pub fn get_max_x(&self) -> Result<c_int, ()> {
+        unsafe { getmaxx(self.ptr) }.check()
+    }
+    pub fn get_max_y(&self) -> Result<c_int, ()> {
+        unsafe { getmaxy(self.ptr) }.check()
     }
     pub fn patch<D, C>(&self, diffs: D) -> Result<(), ()>
         where D : Iterator<Item=(c_int, c_int, C)>
