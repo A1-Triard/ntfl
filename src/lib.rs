@@ -1,6 +1,8 @@
 #![deny(warnings)]
 extern crate libc;
 extern crate either;
+#[macro_use]
+extern crate bitflags;
 
 use std::char::from_u32;
 use std::os::raw::{ c_int, c_void, c_short, c_char, c_uint };
@@ -67,13 +69,26 @@ pub enum Color {
     White = 7,
 }
 
-//#[derive(Debug, Copy, Clone)]
-//pub struct Attr {
-    //value: attr_t,
-//}
-
-//impl Attr {
-//}
+bitflags! {
+    pub struct Attr: attr_t {
+        const NORMAL = 0;
+        const STANDOUT = 1 << 16;
+        const UNDERLINE = 1 << 17;
+        const REVERSE = 1 << 18;
+        const BLINK = 1 << 19;
+        const DIM = 1 << 20;
+        const BOLD = 1 << 21;
+        const ALTCHARSET = 1 << 22;
+        const INVIS = 1 << 23;
+        const PROTECT = 1 << 24;
+        const HORIZONTAL = 1 << 25;
+        const LEFT = 1 << 26;
+        const LOW = 1 << 27;
+        const RIGHT = 1 << 28;
+        const TOP = 1 << 29;
+        const VERTICAL = 1 << 30;
+    }
+}
 
 impl Scr {
     pub fn new() -> Result<Scr, ()> {
@@ -101,7 +116,7 @@ impl Scr {
     }
     pub fn patch<D, C>(&self, diffs: D) -> Result<(), ()>
         where D : Iterator<Item=(c_int, c_int, C)>
-            , C : Iterator<Item=(char, attr_t, Color, Option<Color>)> {
+            , C : Iterator<Item=(char, Attr, Color, Option<Color>)> {
 
         fn color_pair(fg: Color, bg: Option<Color>) -> c_short {
             let bg = match bg {
@@ -115,7 +130,7 @@ impl Scr {
             let mut xi = x;
             for (c, attr, fg, bg) in s {
                 unsafe { wmove(self.ptr, y, xi) }.check()?;
-                unsafe { wattr_set(self.ptr, attr, color_pair(fg, bg), null()) }.check()?;
+                unsafe { wattr_set(self.ptr, attr.bits, color_pair(fg, bg), null()) }.check()?;
                 let mut b = [0; 6];
                 let b = c.encode_utf8(&mut b);
                 unsafe { waddnstr(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
@@ -176,16 +191,17 @@ impl Drop for Scr {
 mod tests {
     use Scr;
     use Color;
+    use Attr;
     use either::{ Left, Right };
 
     #[test]
     fn it_works() {
         let scr = Scr::new().unwrap();
-        scr.patch(Some((6, 1, "ABc".chars().map(|p| (p, 0, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
+        scr.patch(Some((6, 1, "ABc".chars().map(|p| (p, Attr::NORMAL, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
         scr.refresh().unwrap();
         match scr.getch().unwrap() {
             Left(_) => { }
-            Right(c) => { scr.patch(Some((6, 2, Some((c, 0, Color::Red, Some(Color::Black))).into_iter())).into_iter()).unwrap(); }
+            Right(c) => { scr.patch(Some((6, 2, Some((c, Attr::UNDERLINE, Color::Red, Some(Color::Black))).into_iter())).into_iter()).unwrap(); }
         }
         scr.refresh().unwrap();
         scr.getch().unwrap();
