@@ -70,24 +70,24 @@ pub enum Color {
 }
 
 bitflags! {
-    pub struct Attr: attr_t {
-        const NORMAL = 0;
-        const STANDOUT = 1 << 16;
-        const UNDERLINE = 1 << 17;
-        const REVERSE = 1 << 18;
-        const BLINK = 1 << 19;
-        const DIM = 1 << 20;
-        const BOLD = 1 << 21;
-        const ALTCHARSET = 1 << 22;
-        const INVIS = 1 << 23;
-        const PROTECT = 1 << 24;
-        const HORIZONTAL = 1 << 25;
-        const LEFT = 1 << 26;
-        const LOW = 1 << 27;
-        const RIGHT = 1 << 28;
-        const TOP = 1 << 29;
-        const VERTICAL = 1 << 30;
-    }
+pub struct Attr: attr_t {
+    const NORMAL = 0;
+    const STANDOUT = 1 << 16;
+    const UNDERLINE = 1 << 17;
+    const REVERSE = 1 << 18;
+    const BLINK = 1 << 19;
+    const DIM = 1 << 20;
+    const BOLD = 1 << 21;
+    const ALTCHARSET = 1 << 22;
+    const INVIS = 1 << 23;
+    const PROTECT = 1 << 24;
+    const HORIZONTAL = 1 << 25;
+    const LEFT = 1 << 26;
+    const LOW = 1 << 27;
+    const RIGHT = 1 << 28;
+    const TOP = 1 << 29;
+    const VERTICAL = 1 << 30;
+}
 }
 
 impl Scr {
