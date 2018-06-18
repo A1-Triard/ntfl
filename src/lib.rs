@@ -202,7 +202,7 @@ mod tests {
     fn it_works() {
         let scr = Scr::new().unwrap();
         scr.patch(Some((6, 133, "ABc".chars().map(|p| (p, Attr::NORMAL, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
-        scr.patch(Some((8, 133, Some(('l', Attr::ALTCHARSET, Color::Green, Some(Color::Black))).into_iter())).into_iter()).unwrap();
+        scr.patch(Some((8, 133, Some(('l', Attr::ALTCHARSET | Attr::REVERSE, Color::Green, Some(Color::Black))).into_iter())).into_iter()).unwrap();
         scr.refresh().unwrap();
         match scr.getch().unwrap() {
             Left(_) => { }
