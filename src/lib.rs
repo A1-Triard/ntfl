@@ -8,8 +8,6 @@ pub mod scr;
 
 #[cfg(test)]
 mod tests {
-    extern crate either;
-
     use scr::Scr;
     use scr::Color;
     use scr::Attr;
