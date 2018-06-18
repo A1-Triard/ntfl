@@ -56,8 +56,6 @@ fn main() {
 ", &[&ncurses_lib]);
     generate_int_type_rs(false, "attr_t", "attr_t", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
-    generate_int_type_rs(false, "chtype", "chtype", b"#include <ncurses.h>
-", &[&ncurses_lib]);
     generate_int_const_rs("c_uint", "KEY_CODE_YES", "d", b"#include <ncurses.h>
 ", &[&ncurses_lib]);
 }

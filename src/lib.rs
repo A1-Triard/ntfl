@@ -13,7 +13,6 @@ use libc::{ setlocale, LC_ALL };
 include!(concat!(env!("OUT_DIR"), "/c_bool.rs"));
 include!(concat!(env!("OUT_DIR"), "/ERR.rs"));
 include!(concat!(env!("OUT_DIR"), "/attr_t.rs"));
-include!(concat!(env!("OUT_DIR"), "/chtype.rs"));
 include!(concat!(env!("OUT_DIR"), "/KEY_CODE_YES.rs"));
 
 type WINDOW = c_void;
@@ -26,8 +25,6 @@ extern "C" {
     fn wmove(w: *mut WINDOW, y: c_int, x: c_int) -> c_int;
     fn waddnstr(w: *mut WINDOW, s: *const c_char, n: c_int) -> c_int;
     fn winsnstr(w: *mut WINDOW, s: *const c_char, n: c_int) -> c_int;
-    fn waddch(w: *mut WINDOW, ch: chtype) -> c_int;
-    fn winsch(w: *mut WINDOW, ch: chtype) -> c_int;
     fn wgetch(w: *mut WINDOW) -> c_int;
     fn getmaxx(w: *mut WINDOW) -> c_int;
     fn getmaxy(w: *mut WINDOW) -> c_int;
@@ -36,10 +33,7 @@ extern "C" {
     fn keypad(w: *mut WINDOW, bf: c_bool) -> c_int;
     fn init_pair(pair: c_short, f: c_short, b: c_short) -> c_int;
     fn wattr_set(w: *mut WINDOW, attrs: attr_t, pair: c_short, opts: *const c_void) -> c_int;
-    static acs_map: *const chtype;
 }
-
-pub type Acs = chtype;
 
 trait Checkable where Self: std::marker::Sized {
     fn is_err(&self) -> bool;
@@ -97,11 +91,6 @@ pub struct Attr: attr_t {
 }
 }
 
-fn acs(c: char) -> Acs {
-    let d = c as u32 as u8 as isize;
-    unsafe { *acs_map.offset(d) }
-}
-
 impl Scr {
     pub fn new() -> Result<Scr, ()> {
         unsafe { setlocale(LC_ALL, "\0".as_ptr() as *const c_char) };
@@ -120,8 +109,6 @@ impl Scr {
         unsafe { keypad(p, 1) }.check()?;
         Ok(Scr { ptr: p })
     }
-    pub fn acs_ul_corner(&self) -> Acs { acs('c') }
-
     pub fn get_width(&self) -> Result<c_int, ()> {
         unsafe { getmaxx(self.ptr) }.check()
     }
@@ -130,7 +117,7 @@ impl Scr {
     }
     pub fn patch<D, C>(&self, diffs: D) -> Result<(), ()>
         where D : Iterator<Item=(c_int, c_int, C)>
-            , C : Iterator<Item=(Either<Acs, char>, Attr, Color, Option<Color>)> {
+            , C : Iterator<Item=(char, Attr, Color, Option<Color>)> {
 
         fn color_pair(fg: Color, bg: Option<Color>) -> c_short {
             let bg = match bg {
@@ -144,21 +131,13 @@ impl Scr {
 
         for (y, x, s) in diffs {
             let mut xi = x;
-            for (ac, attr, fg, bg) in s {
+            for (c, attr, fg, bg) in s {
                 unsafe { wmove(self.ptr, y, xi) }.check()?;
                 unsafe { wattr_set(self.ptr, attr.bits, color_pair(fg, bg), null()) }.check()?;
-                match ac {
-                    Left(a) => {
-                        let out = if xi + 1 < width { waddch } else { winsch };
-                        unsafe { out(self.ptr, a) }.check()?;
-                    },
-                    Right(c) => {
-                        let out = if xi + 1 < width { waddnstr } else { winsnstr };
-                        let mut b = [0; 6];
-                        let b = c.encode_utf8(&mut b);
-                        unsafe { out(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
-                    }
-                }
+                let out = if xi + 1 < width { waddnstr } else { winsnstr };
+                let mut b = [0; 6];
+                let b = c.encode_utf8(&mut b);
+                unsafe { out(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
                 xi = xi + 1;
             }
         }
@@ -222,11 +201,12 @@ mod tests {
     #[test]
     fn it_works() {
         let scr = Scr::new().unwrap();
-        scr.patch(Some((6, 133, "ABc".chars().map(|p| (Right(p), Attr::NORMAL, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
+        scr.patch(Some((6, 133, "ABc".chars().map(|p| (p, Attr::NORMAL, Color::Green, Some(Color::Black))))).into_iter()).unwrap();
+        scr.patch(Some((8, 133, Some(('l', Attr::ALTCHARSET, Color::Green, Some(Color::Black))).into_iter())).into_iter()).unwrap();
         scr.refresh().unwrap();
         match scr.getch().unwrap() {
             Left(_) => { }
-            Right(c) => { scr.patch(Some((6, 2, Some((Right(c), Attr::UNDERLINE, Color::Red, Some(Color::Black))).into_iter())).into_iter()).unwrap(); }
+            Right(c) => { scr.patch(Some((6, 2, Some((c, Attr::UNDERLINE, Color::Red, Some(Color::Black))).into_iter())).into_iter()).unwrap(); }
         }
         scr.refresh().unwrap();
         scr.getch().unwrap();
