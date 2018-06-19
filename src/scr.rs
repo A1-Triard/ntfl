@@ -114,10 +114,7 @@ impl Scr {
     pub fn get_height(&self) -> Result<c_int, ()> {
         unsafe { getmaxy(self.ptr) }.check()
     }
-    pub fn patch<D, C>(&mut self, diffs: D) -> Result<(), ()>
-        where D : Iterator<Item=(c_int, c_int, C)>
-            , C : Iterator<Item=(char, Attr, Color, Option<Color>)> {
-
+    pub fn out(&mut self, y: c_int, x: c_int, ch: char, attr: Attr, fg: Color, bg: Option<Color>) -> Result<(), ()> {
         fn color_pair(fg: Color, bg: Option<Color>) -> c_short {
             let bg = match bg {
                 Some(c) => 1 + (c as i8 as c_short),
@@ -126,20 +123,12 @@ impl Scr {
             (bg << 3) | (fg as i8 as c_short)
         }
 
-        let width = self.get_width()?;
-
-        for (y, x, s) in diffs {
-            let mut xi = x;
-            for (c, attr, fg, bg) in s {
-                unsafe { wmove(self.ptr, y, xi) }.check()?;
-                unsafe { wattr_set(self.ptr, attr.bits, color_pair(fg, bg), null()) }.check()?;
-                let out = if xi + 1 < width { waddnstr } else { winsnstr };
-                let mut b = [0; 6];
-                let b = c.encode_utf8(&mut b);
-                unsafe { out(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
-                xi = xi + 1;
-            }
-        }
+        unsafe { wmove(self.ptr, y, x) }.check()?;
+        unsafe { wattr_set(self.ptr, attr.bits, color_pair(fg, bg), null()) }.check()?;
+        let outstr = if x + 1 < self.get_width()? { waddnstr } else { winsnstr };
+        let mut b = [0; 6];
+        let b = ch.encode_utf8(&mut b);
+        unsafe { outstr(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
         Ok(())
     }
     pub fn refresh(&mut self, cursor: Option<(c_int, c_int)>) -> Result<(), ()> {
