@@ -10,9 +10,7 @@ use std::mem::replace;
 
 pub mod scr;
 pub mod ncurses;
-use scr::Attr;
-use scr::Color;
-use scr::Scr;
+use scr::{ Attr, Color, Scr, Texel };
 
 struct RectValue {
     top: isize,
@@ -70,8 +68,8 @@ impl Rect {
     }
     pub fn include(&mut self, y: isize, x: isize) {
         if let Some(ref mut val) = self.val {
-            if y <= val.top { val.top = y; } else { val.height = max(val.height, y - val.top); }
-            if x <= val.left { val.left = x; } else { val.width = max(val.width, x - val.left); }
+            if y <= val.top { val.top = y; } else { val.height = max(val.height, y + 1 - val.top); }
+            if x <= val.left { val.left = x; } else { val.width = max(val.width, x + 1 - val.left); }
         } else {
             self.val = Some(RectValue { top: x, left: y, height: 1, width: 1 });
         }
@@ -114,22 +112,14 @@ impl Rect {
     }
     pub fn scan<I, R>(&self, mut it: I) -> Option<R> where I : FnMut(isize, isize) -> Option<R> {
         if let Some(ref val) = self.val {
-            for y in val.top .. val.bottom() - 1 {
-                for x in val.left .. val.right() - 1 {
+            for y in val.top .. val.bottom() {
+                for x in val.left .. val.right() {
                     if let Some(r) = it(y, x) { return Some(r); }
                 }
             }
         }
         None
     }
-}
-
-#[derive(Debug, Copy, Clone)]
-struct Texel {
-    pub ch: char,
-    pub attr: Attr,
-    pub fg: Color,
-    pub bg: Option<Color>,
 }
 
 pub struct Window {
@@ -143,9 +133,17 @@ impl Window {
         let (height, width) = bounds.size();
         Window {
             bounds: bounds,
-            content: vec![vec![Texel { ch: ' ', attr: Attr::NORMAL, fg: Color::Black, bg: None }; width as usize]; height as usize],
+            content: vec![vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]; height as usize],
             invalid: Rect::empty()
         }
+    }
+    pub fn set_bounds(&mut self, bounds: Rect) {
+        let (height, width) = bounds.size();
+        for row in &mut self.content {
+            row.resize(width as usize, Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None });
+        }
+        self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; height as usize]);
+        self.invalid = self.invalid.intersection(&bounds);
     }
     pub fn out(&mut self, y: isize, x: isize, ch: char, attr: Attr, fg: Color, bg: Option<Color>) {
         self.invalid.include(y, x);
@@ -160,7 +158,7 @@ impl Window {
             viewport.offset(-y, -x);
             let err = viewport.scan(|yi, xi| {
                 let texel = &self.content[yi as usize][xi as usize];
-                match s.out(y + yi, x + xi, texel.ch, texel.attr, texel.fg, texel.bg) {
+                match s.out(y + yi, x + xi, texel) {
                     Err(()) => Some(()),
                     Ok(()) => None
                 }
@@ -207,10 +205,13 @@ impl Window {
 #[cfg(test)]
 mod tests {
     use Rect;
+    use Window;
+    use scr::tests::TestScr;
 
     use scr::Scr;
     use scr::Color;
     use scr::Attr;
+    use scr::Texel;
     use ncurses::NCurses;
     use either::{ Left, Right };
 
@@ -223,16 +224,30 @@ mod tests {
     }
 
     #[test]
+    fn window_scr() {
+        let mut w = Window::new(Rect::tlhw(3, 5, 1, 2));
+        w.out(0, 0, '+', Attr::NORMAL, Color::Green, Some(Color::Black));
+        w.out(0, 1, '-', Attr::NORMAL, Color::Green, Some(Color::Black));
+        let mut s = TestScr::new(100, 100);
+        let mut invalid = Rect::empty();
+        w.scr(&mut s, &mut invalid);
+        assert!(Some((3, 5)) == invalid.loc());
+        assert!((1, 2) == invalid.size(), format!("({}, {})", invalid.size().0, invalid.size().1));
+        assert!('+' == s.content(3, 5).ch, format!("{}", s.content(3, 5).ch));
+        assert!('-' == s.content(3, 6).ch, format!("{}", s.content(3, 6).ch));
+    }
+
+    #[test]
     fn it_works() {
         let mut scr = NCurses::new().unwrap();
-        scr.out(6, 133, 'A', Attr::NORMAL, Color::Green, None).unwrap();
-        scr.out(6, 134, 'B', Attr::NORMAL, Color::Green, None).unwrap();
-        scr.out(6, 135, 'c', Attr::NORMAL, Color::Green, None).unwrap();
-        scr.out(5, 5, 'l', Attr::ALTCHARSET | Attr::REVERSE, Color::Green, Some(Color::Black)).unwrap();
+        scr.out(6, 133, &Texel { ch: 'A', attr: Attr::NORMAL, fg: Color::Green, bg: None }).unwrap();
+        scr.out(6, 134, &Texel { ch: 'B', attr: Attr::NORMAL, fg: Color::Green, bg: None }).unwrap();
+        scr.out(6, 135, &Texel { ch: 'c', attr: Attr::NORMAL, fg: Color::Green, bg: None }).unwrap();
+        scr.out(5, 5, &Texel { ch: 'l', attr: Attr::ALTCHARSET | Attr::REVERSE, fg: Color::Green, bg: Some(Color::Black) }).unwrap();
         scr.refresh(Some((5, 5))).unwrap();
         match scr.getch().unwrap() {
             Left(_) => { }
-            Right(c) => { scr.out(6, 2, c, Attr::UNDERLINE, Color::Red, None).unwrap(); }
+            Right(c) => { scr.out(6, 2, &Texel { ch: c, attr: Attr::UNDERLINE, fg: Color::Red, bg: None }).unwrap(); }
         }
         scr.refresh(None).unwrap();
         scr.getch().unwrap();

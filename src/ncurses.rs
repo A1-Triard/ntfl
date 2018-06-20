@@ -6,7 +6,7 @@ use std::ptr::null;
 use either::{ Either, Left, Right };
 use libc::{ setlocale, LC_ALL };
 
-use scr::{ Color, Attr, Scr };
+use scr::{ Color, Scr, Texel };
 
 include!(concat!(env!("OUT_DIR"), "/c_bool.rs"));
 include!(concat!(env!("OUT_DIR"), "/ERR.rs"));
@@ -63,8 +63,8 @@ impl NCurses {
         unsafe { setlocale(LC_ALL, "\0".as_ptr() as *const c_char) };
         let p = unsafe { initscr() }.check()?;
         unsafe { start_color() }.check()?;
-        for bg in -1 .. 7 {
-        for fg in 0 .. 7 {
+        for bg in -1 .. 8 {
+        for fg in 0 .. 8 {
             if fg == 0 && bg == -1 {
                 unsafe { assume_default_colors(0, -1) }
             } else {
@@ -94,7 +94,7 @@ impl Scr for NCurses {
         let h = self.get_height_i()?;
         Ok(h as isize)
     }
-    fn out(&mut self, y: isize, x: isize, ch: char, attr: Attr, fg: Color, bg: Option<Color>) -> Result<(), ()> {
+    fn out(&mut self, y: isize, x: isize, c: &Texel) -> Result<(), ()> {
         fn color_pair(fg: Color, bg: Option<Color>) -> c_short {
             let bg = match bg {
                 Some(c) => 1 + (c as i8 as c_short),
@@ -106,10 +106,10 @@ impl Scr for NCurses {
         let y = y as c_int;
         let x = x as c_int;
         unsafe { wmove(self.ptr, y, x) }.check()?;
-        unsafe { wattr_set(self.ptr, (attr.bits() as attr_t) << 16, color_pair(fg, bg), null()) }.check()?;
+        unsafe { wattr_set(self.ptr, (c.attr.bits() as attr_t) << 16, color_pair(c.fg, c.bg), null()) }.check()?;
         let outstr = if x + 1 < self.get_width_i()? { waddnstr } else { winsnstr };
         let mut b = [0; 6];
-        let b = ch.encode_utf8(&mut b);
+        let b = c.ch.encode_utf8(&mut b);
         unsafe { outstr(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
         Ok(())
     }
