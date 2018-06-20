@@ -4,32 +4,76 @@ extern crate either;
 #[macro_use]
 extern crate bitflags;
 
+use std::cmp::max;
 //use std::collections::LinkedList;
-//use std::os::raw::{ c_int };
+use std::mem::replace;
+use std::os::raw::{ c_int };
 
 pub mod scr;
+pub mod ncurses;
+use scr::Attr;
+use scr::Color;
 
-//struct Texel {
-    //ch: char,
-    //attr: Attr,
-    //fg: Color,
-    //bg: Option<Color>,
-    //view: Option<&Window>,
+pub struct Rect {
+    pub y: c_int,
+    pub x: c_int,
+    pub height: c_int,
+    pub width: c_int,
+}
+
+impl Rect {
+    pub fn right(&self) -> c_int { self.x + self.width }
+    pub fn bottom(&self) -> c_int { self.y + self.height }
+    pub fn contains(&self, y: c_int, x: c_int) -> bool {
+        x >= self.x && y >= self.y && x < self.right() && y < self.bottom()
+    }
+    pub fn include(&mut self, y: c_int, x: c_int) {
+        if y <= self.y { self.y = y; } else { self.height = max(self.height, y - self.y); }
+        if x <= self.x { self.x = x; } else { self.width = max(self.width, x - self.x); }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Texel {
+    pub ch: char,
+    pub attr: Attr,
+    pub fg: Color,
+    pub bg: Option<Color>,
+}
+
+pub struct Window {
+    bounds: Rect,
+    content: Vec<Vec<Texel>>,
+    invalid: Option<Rect>,
+}
+
+impl Window {
+    pub fn new(bounds: Rect) -> Window {
+        let width = bounds.width;
+        let height = bounds.height;
+        Window { bounds: bounds, content: vec![vec![Texel { ch: ' ', attr: Attr::NORMAL, fg: Color::Black, bg: None }; width as usize]; height as usize], invalid: None }
+    }
+    pub fn bounds(&self) -> &Rect { &self.bounds }
+    pub fn out(&mut self, y: c_int, x: c_int, ch: char, attr: Attr, fg: Color, bg: Option<Color>) {
+        if !self.invalid.as_mut().map(|i| i.include(y, x) ).is_some() {
+            self.invalid = Some(Rect { y: y, x: x, height: 1, width: 1 });
+        }
+        replace(&mut self.content[y as usize][x as usize], Texel { ch: ch, attr: attr, fg: fg, bg: bg });
+    }
+}
+
+
+//pub struct WindowsHost {
+    //windows: LinkedList<Window>,
 //}
+
+
 
 //struct Row {
     //texels: Vec<Texel>,
     //invalid: (c_int, c_int),
 //}
 
-//pub struct Window {
-    //y: c_int,
-    //x: c_int,
-    //height: c_int,
-    //width: c_int,
-    //windows: LinkedList<Window>,
-    //rows: Vec<Row>,
-//}
 
 //impl Window {
     //fn new() -> Window {
@@ -52,14 +96,25 @@ pub mod scr;
 
 #[cfg(test)]
 mod tests {
+    use Rect;
+
     use scr::Scr;
     use scr::Color;
     use scr::Attr;
+    use ncurses::NCurses;
     use either::{ Left, Right };
 
     #[test]
+    fn rect_contains() {
+        let r = Rect { y: 5, x: 7, height: 10, width: 70 };
+        assert!(r.contains(10, 10));
+        assert!(r.contains(5, 10));
+        assert!(!r.contains(10, 5));
+    }
+
+    #[test]
     fn it_works() {
-        let mut scr = Scr::new().unwrap();
+        let mut scr = NCurses::new().unwrap();
         scr.out(6, 133, 'A', Attr::NORMAL, Color::Green, None).unwrap();
         scr.out(6, 134, 'B', Attr::NORMAL, Color::Green, None).unwrap();
         scr.out(6, 135, 'c', Attr::NORMAL, Color::Green, None).unwrap();
