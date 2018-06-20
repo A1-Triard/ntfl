@@ -7,7 +7,6 @@ extern crate bitflags;
 use std::cmp::max;
 //use std::collections::LinkedList;
 use std::mem::replace;
-use std::os::raw::{ c_int };
 
 pub mod scr;
 pub mod ncurses;
@@ -15,19 +14,19 @@ use scr::Attr;
 use scr::Color;
 
 pub struct Rect {
-    pub y: c_int,
-    pub x: c_int,
-    pub height: c_int,
-    pub width: c_int,
+    pub y: isize,
+    pub x: isize,
+    pub height: isize,
+    pub width: isize,
 }
 
 impl Rect {
-    pub fn right(&self) -> c_int { self.x + self.width }
-    pub fn bottom(&self) -> c_int { self.y + self.height }
-    pub fn contains(&self, y: c_int, x: c_int) -> bool {
+    pub fn right(&self) -> isize { self.x + self.width }
+    pub fn bottom(&self) -> isize { self.y + self.height }
+    pub fn contains(&self, y: isize, x: isize) -> bool {
         x >= self.x && y >= self.y && x < self.right() && y < self.bottom()
     }
-    pub fn include(&mut self, y: c_int, x: c_int) {
+    pub fn include(&mut self, y: isize, x: isize) {
         if y <= self.y { self.y = y; } else { self.height = max(self.height, y - self.y); }
         if x <= self.x { self.x = x; } else { self.width = max(self.width, x - self.x); }
     }
@@ -54,12 +53,13 @@ impl Window {
         Window { bounds: bounds, content: vec![vec![Texel { ch: ' ', attr: Attr::NORMAL, fg: Color::Black, bg: None }; width as usize]; height as usize], invalid: None }
     }
     pub fn bounds(&self) -> &Rect { &self.bounds }
-    pub fn out(&mut self, y: c_int, x: c_int, ch: char, attr: Attr, fg: Color, bg: Option<Color>) {
+    pub fn out(&mut self, y: isize, x: isize, ch: char, attr: Attr, fg: Color, bg: Option<Color>) {
         if !self.invalid.as_mut().map(|i| i.include(y, x) ).is_some() {
             self.invalid = Some(Rect { y: y, x: x, height: 1, width: 1 });
         }
         replace(&mut self.content[y as usize][x as usize], Texel { ch: ch, attr: attr, fg: fg, bg: bg });
     }
+    //pub fn scr(&mut self,
 }
 
 
