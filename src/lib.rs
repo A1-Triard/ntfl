@@ -150,29 +150,8 @@ impl WindowData {
             row.resize(width as usize, Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None });
         }
         self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]);
-        self.invalid = self.invalid.intersection(&bounds);
+        self.invalid = self.invalid.intersection(&bounds); // TODO fix Rect::tlhw(0, 0, height, width)
         replace(&mut self.bounds, bounds)
-    }
-    fn global<T, F>(&self, state: &mut T, f: F) where F : Fn(&WindowData, &mut T) -> bool {
-        fn go<T, F>(window: &WindowData, state: &mut T, f: F) where F : Fn(&WindowData, &mut T) -> bool {
-            if f(window, state) { return; }
-            if let Some(ref parent) = window.parent {
-                go(&parent.borrow(), state, f);
-            }
-        }
-        if let Some(ref parent) = self.parent {
-            go(&parent.borrow(), state, f);
-        }
-    }
-    fn global_bounds(&self) -> Rect {
-        let mut bounds = *&self.bounds;
-        self.global(&mut bounds, |window, rect| {
-            match window.bounds.loc() {
-                None => { replace(rect, Rect::empty()); true }
-                Some((y, x)) => { rect.offset(y, x); false }
-            }
-        });
-        bounds
     }
     fn out(&mut self, y: isize, x: isize, c: Texel) {
         self.invalid.include(y, x);
@@ -256,9 +235,19 @@ impl Window {
         self.data.borrow_mut().out(y, x, c);
     }
     pub fn set_bounds(&self, bounds: Rect) {
-        self.host.borrow_mut().invalid.union(self.data.borrow().global_bounds());
-        self.data.borrow_mut().set_bounds(bounds);
-        self.host.borrow_mut().invalid.union(self.data.borrow().global_bounds());
+        fn global(window: &WindowData, child_y: isize, child_x: isize) -> Option<(isize, isize)> {
+            window.bounds.loc()
+                .map(|(y, x)| (y + child_y, x + child_x))
+                .and_then(|(y, x)| window.parent.as_ref().map_or(Some((y, x)), |parent| global(&parent.borrow(), y, x)))
+        }
+        let mut new_bounds = *&bounds;
+        let mut old_bounds = self.data.borrow_mut().set_bounds(bounds);
+        if let Some((parent_y, parent_x)) = self.data.borrow().parent.as_ref().map_or(Some((0, 0)), |parent| global(&parent.borrow(), 0, 0)) {
+            old_bounds.offset(parent_y, parent_x);
+            new_bounds.offset(parent_y, parent_x);
+            self.host.borrow_mut().invalid.union(old_bounds);
+            self.host.borrow_mut().invalid.union(new_bounds);
+        }
     }
     pub fn new_sub(&self) -> Window {
         let w = Rc::new(RefCell::new(WindowData::new(Some(Rc::clone(&self.data)))));
