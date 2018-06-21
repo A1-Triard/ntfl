@@ -254,6 +254,39 @@ impl Window {
         self.data.borrow_mut().subwindows.push(Rc::clone(&w));
         Window { host: Rc::clone(&self.host), data: w }
     }
+    pub fn z_index(&self) -> usize {
+        fn index(windows: &Vec<Rc<RefCell<WindowData>>>, window: &Rc<RefCell<WindowData>>) -> usize {
+            windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0
+        }
+        if let Some(ref parent) = self.data.borrow().parent {
+            index(&parent.borrow().subwindows, &self.data)
+        } else {
+            index(&self.host.borrow().windows, &self.data)
+        }
+    }
+    pub fn set_z_index(&self, index: usize) {
+        fn set_index(windows: &mut Vec<Rc<RefCell<WindowData>>>, window: &Rc<RefCell<WindowData>>, index: usize) {
+             let old = windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0;
+             let window = windows.remove(old);
+             let index = min(index, windows.len());
+             windows.insert(index, window);
+        }
+        fn global(window: &WindowData, child_y: isize, child_x: isize) -> Option<(isize, isize)> {
+            window.bounds.loc()
+                .map(|(y, x)| (y + child_y, x + child_x))
+                .and_then(|(y, x)| window.parent.as_ref().map_or(Some((y, x)), |parent| global(&parent.borrow(), y, x)))
+        }
+        let mut bounds = *&self.data.borrow().bounds;
+        if let Some((parent_y, parent_x)) = self.data.borrow().parent.as_ref().map_or(Some((0, 0)), |parent| global(&parent.borrow(), 0, 0)) {
+            bounds.offset(parent_y, parent_x);
+            self.host.borrow_mut().invalid.union(bounds);
+        }
+        if let Some(ref parent) = self.data.borrow().parent {
+            set_index(&mut parent.borrow_mut().subwindows, &self.data, index)
+        } else {
+            set_index(&mut self.host.borrow_mut().windows, &self.data, index)
+        }
+    }
 }
 
 impl Drop for Window {
@@ -275,6 +308,7 @@ impl Drop for Window {
 mod tests {
     use std::rc::Rc;
     use Rect;
+    use Window;
     use WindowData;
     use WindowsHost;
     use scr::tests::TestScr;
@@ -393,6 +427,72 @@ mod tests {
             assert_eq!(Rect::empty(), host.val.borrow().invalid);
         }
         assert_eq!(Rect::tlhw(0, 0, 9, 14), host.val.borrow().invalid);
+    }
+
+    #[test]
+    fn window_z_index() {
+        fn fill3x3(window: &Window, fg: Color) {
+            window.out(0, 0, Texel { ch: '1', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(0, 1, Texel { ch: '2', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(0, 2, Texel { ch: '3', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(1, 0, Texel { ch: '4', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(1, 1, Texel { ch: '5', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(1, 2, Texel { ch: '6', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(2, 0, Texel { ch: '7', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(2, 1, Texel { ch: '8', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+            window.out(2, 2, Texel { ch: '9', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
+        }
+        let mut scr = TestScr::new(4, 4);
+        let host = WindowsHost::new();
+        let window1 = host.new_window();
+        window1.set_bounds(Rect::tlhw(0, 0, 3, 3));
+        fill3x3(&window1, Color::Green);
+        let window2 = host.new_window();
+        window2.set_bounds(Rect::tlhw(1, 1, 3, 3));
+        fill3x3(&window2, Color::Red);
+        host.scr(&mut scr);
+        assert_eq!([
+            Texel { ch: '1', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '2', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '3', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: 'T', attr: Attr::NORMAL, fg: Color::Cyan, bg: Some(Color::Red) },
+            Texel { ch: '4', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '1', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '2', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '3', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '7', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '4', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '5', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '6', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: 'T', attr: Attr::NORMAL, fg: Color::Cyan, bg: Some(Color::Red) },
+            Texel { ch: '7', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '8', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '9', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+        ], &*scr.content);
+        assert_eq!(0, window1.z_index());
+        assert_eq!(1, window2.z_index());
+        window1.set_z_index(5);
+        assert_eq!(0, window2.z_index());
+        assert_eq!(1, window1.z_index());
+        host.scr(&mut scr);
+        assert_eq!([
+            Texel { ch: '1', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '2', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '3', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: 'T', attr: Attr::NORMAL, fg: Color::Cyan, bg: Some(Color::Red) },
+            Texel { ch: '4', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '5', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '6', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '3', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '7', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '8', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '9', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
+            Texel { ch: '6', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: 'T', attr: Attr::NORMAL, fg: Color::Cyan, bg: Some(Color::Red) },
+            Texel { ch: '7', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '8', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+            Texel { ch: '9', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
+        ], &*scr.content);
     }
 
     //#[test]

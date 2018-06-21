@@ -2,7 +2,7 @@
 
 use either::Either;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(i8)]
 pub enum Color {
     Black = 0,
@@ -36,7 +36,7 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Texel {
     pub ch: char,
     pub attr: Attr,
