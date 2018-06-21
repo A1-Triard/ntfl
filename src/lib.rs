@@ -1,17 +1,20 @@
 #![deny(warnings)]
-extern crate libc;
-extern crate either;
 #[macro_use]
 extern crate bitflags;
+extern crate either;
+extern crate libc;
 
+use std::cell::RefCell;
 use std::cmp::{ min, max };
-//use std::collections::LinkedList;
 use std::mem::replace;
+use std::ops::DerefMut;
+use std::rc::Rc;
 
 pub mod scr;
 pub mod ncurses;
 use scr::{ Attr, Color, Scr, Texel };
 
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 struct RectValue {
     top: isize,
     left: isize,
@@ -24,6 +27,7 @@ impl RectValue {
     pub fn right(&self) -> isize { self.left + self.width }
 }
 
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct Rect {
     val: Option<RectValue>,
 }
@@ -80,7 +84,7 @@ impl Rect {
             val.left += dx;
         }
     }
-    pub fn merge(&mut self, r: Rect) {
+    pub fn union(&mut self, r: Rect) {
         if let Some(r) = r.val {
             if let Some(ref mut val) = self.val {
                 let bottom = val.bottom();
@@ -122,38 +126,39 @@ impl Rect {
     }
 }
 
-pub struct Window {
+struct WindowData {
     bounds: Rect,
     content: Vec<Vec<Texel>>,
     invalid: Rect,
 }
 
-impl Window {
-    pub fn new(bounds: Rect) -> Window {
+impl WindowData {
+    fn new(bounds: Rect) -> WindowData {
         let (height, width) = bounds.size();
-        Window {
+        WindowData {
             bounds: bounds,
             content: vec![vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]; height as usize],
             invalid: Rect::empty()
         }
     }
-    pub fn set_bounds(&mut self, bounds: Rect) {
+    fn set_bounds(&mut self, bounds: Rect) -> Rect {
         let (height, width) = bounds.size();
         for row in &mut self.content {
             row.resize(width as usize, Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None });
         }
         self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; height as usize]);
         self.invalid = self.invalid.intersection(&bounds);
+        replace(&mut self.bounds, bounds)
     }
-    pub fn out(&mut self, y: isize, x: isize, ch: char, attr: Attr, fg: Color, bg: Option<Color>) {
+    fn out(&mut self, y: isize, x: isize, c: Texel) {
         self.invalid.include(y, x);
-        replace(&mut self.content[y as usize][x as usize], Texel { ch: ch, attr: attr, fg: fg, bg: bg });
+        replace(&mut self.content[y as usize][x as usize], c);
     }
-    pub fn scr(&mut self, s: &mut Scr, global_invalid: &mut Rect) {
+    fn scr(&mut self, s: &mut Scr, global_invalid: &mut Rect) {
         let mut invalid = replace(&mut self.invalid, Rect::empty());
         if let Some((y, x)) = self.bounds.loc() {
             invalid.offset(y, x);
-            global_invalid.merge(invalid);
+            global_invalid.union(invalid);
             let mut viewport = self.bounds.intersection(global_invalid);
             viewport.offset(-y, -x);
             let err = viewport.scan(|yi, xi| {
@@ -170,42 +175,63 @@ impl Window {
     }
 }
 
+pub struct Window {
+    host: Rc<RefCell<WindowsHostValue>>,
+    data: Rc<RefCell<WindowData>>,
+}
 
-//pub struct WindowsHost {
-    //windows: LinkedList<Window>,
-//}
+struct WindowsHostValue {
+    windows: Vec<Rc<RefCell<WindowData>>>,
+    invalid: Rect,
+}
 
+pub struct WindowsHost {
+    val: Rc<RefCell<WindowsHostValue>>,
+}
 
+impl WindowsHost {
+    pub fn new() -> WindowsHost {
+        WindowsHost { val: Rc::new(RefCell::new(WindowsHostValue { windows: Vec::new(), invalid: Rect::empty() })) }
+    }
+    pub fn new_window(&mut self) -> Window {
+        let w = Rc::new(RefCell::new(WindowData::new(Rect::empty())));
+        self.val.borrow_mut().windows.push(Rc::clone(&w));
+        Window { host: Rc::clone(&self.val), data: w }
+    }
+    pub fn scr(&mut self, s: &mut Scr) {
+        let mut ref_mut = self.val.borrow_mut();
+        let ref mut b = ref_mut.deref_mut();
+        let mut invalid = replace(&mut b.invalid, Rect::empty());
+        for w in b.windows.iter_mut() {
+            w.borrow_mut().scr(s, &mut invalid);
+        }
+    }
+}
 
-//struct Row {
-    //texels: Vec<Texel>,
-    //invalid: (c_int, c_int),
-//}
+impl Window {
+    pub fn out(&self, y: isize, x: isize, c: Texel) {
+        self.data.borrow_mut().out(y, x, c);
+    }
+    pub fn set_bounds(&mut self, bounds: Rect) {
+        self.host.borrow_mut().invalid.union(*&bounds);
+        self.host.borrow_mut().invalid.union(self.data.borrow_mut().set_bounds(bounds));
+    }
+}
 
-
-//impl Window {
-    //fn new() -> Window {
-        //Window { y: 0, x: 0, height: 0, width: 0, windows: LinkedList::new(), rows: Vec::new() }
-    //}
-    //fn resize(&mut self, left: c_int, top: c_int, right: c_int, bottom: c_int) {
-        //let width = self.width + left + right;
-        //let height = self.height + top + bottom;
-        //self.rows.resize(height, Vec::with_capacity(width));
-        //if left > 0 {
-            //for i in 0
-        //} else if left < 0 {
-        //}
-        //self.y = y - top;
-        //self.x = x - left;
-        //self.height = height + top + bottom;
-        //self.width = width + left + right;
-    //}
-//}
+impl Drop for Window {
+    fn drop(&mut self) {
+        self.host.borrow_mut().invalid.union(self.data.borrow_mut().set_bounds(Rect::empty()));
+        let i = self.host.borrow_mut().windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, &self.data) }).next().unwrap().0;
+        self.host.borrow_mut().windows.remove(i);
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
     use Rect;
-    use Window;
+    use WindowData;
+    use WindowsHost;
     use scr::tests::TestScr;
 
     use scr::Scr;
@@ -225,9 +251,9 @@ mod tests {
 
     #[test]
     fn window_scr() {
-        let mut w = Window::new(Rect::tlhw(3, 5, 1, 2));
-        w.out(0, 0, '+', Attr::NORMAL, Color::Green, Some(Color::Black));
-        w.out(0, 1, '-', Attr::NORMAL, Color::Green, Some(Color::Black));
+        let mut w = WindowData::new(Rect::tlhw(3, 5, 1, 2));
+        w.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+        w.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         let mut s = TestScr::new(100, 100);
         let mut invalid = Rect::empty();
         w.scr(&mut s, &mut invalid);
@@ -235,6 +261,27 @@ mod tests {
         assert!((1, 2) == invalid.size(), format!("({}, {})", invalid.size().0, invalid.size().1));
         assert!('+' == s.content(3, 5).ch, format!("{}", s.content(3, 5).ch));
         assert!('-' == s.content(3, 6).ch, format!("{}", s.content(3, 6).ch));
+    }
+
+    #[test]
+    fn window_set_bounds() {
+        let mut w = WindowData::new(Rect::empty());
+        w.set_bounds(Rect::tlhw(5, 7, 3, 500));
+        assert!(Rect::tlhw(5, 7, 3, 500) == w.bounds);
+    }
+
+    #[test]
+    fn new_window_drop() {
+        let mut host = WindowsHost::new();
+        let window_ref = {
+            let mut window = host.new_window();
+            let window_ref = Rc::downgrade(&window.data);
+            assert!(window_ref.upgrade().is_some());
+            window_ref
+        };
+        if let Some(window) = window_ref.upgrade() {
+            panic!(format!("{}", Rc::strong_count(&window)));
+        }
     }
 
     #[test]
