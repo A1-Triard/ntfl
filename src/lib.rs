@@ -52,6 +52,9 @@ impl Rect {
             }
         }
     }
+    pub fn clear(&mut self) {
+        self.val = None;
+    }
     pub fn loc(&self) -> Option<(isize, isize)> {
         match self.val {
             None => None,
@@ -130,15 +133,18 @@ struct WindowData {
     bounds: Rect,
     content: Vec<Vec<Texel>>,
     invalid: Rect,
+    parent: Option<Rc<RefCell<WindowData>>>,
+    subwindows: Vec<Rc<RefCell<WindowData>>>,
 }
 
 impl WindowData {
-    fn new(bounds: Rect) -> WindowData {
-        let (height, width) = bounds.size();
+    fn new(parent: Option<Rc<RefCell<WindowData>>>) -> WindowData {
         WindowData {
-            bounds: bounds,
-            content: vec![vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]; height as usize],
-            invalid: Rect::empty()
+            bounds: Rect::empty(),
+            content: Vec::new(),
+            invalid: Rect::empty(),
+            parent: parent,
+            subwindows: Vec::new()
         }
     }
     fn set_bounds(&mut self, bounds: Rect) -> Rect {
@@ -149,6 +155,22 @@ impl WindowData {
         self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]);
         self.invalid = self.invalid.intersection(&bounds);
         replace(&mut self.bounds, bounds)
+    }
+    fn global_bounds(&self) -> Rect {
+        fn global_offset(window: &WindowData, rect: &mut Rect) {
+            match window.bounds.loc() {
+                None => { rect.clear(); return; }
+                Some((y, x)) => { rect.offset(y, x); }
+            }
+            if let Some(ref parent) = window.parent {
+                global_offset(&parent.borrow(), rect);
+            }
+        }
+        let mut bounds = *&self.bounds;
+        if let Some(ref parent) = self.parent {
+            global_offset(&parent.borrow(), &mut bounds);
+        }
+        bounds
     }
     fn out(&mut self, y: isize, x: isize, c: Texel) {
         self.invalid.include(y, x);
@@ -193,17 +215,23 @@ impl WindowsHost {
     pub fn new() -> WindowsHost {
         WindowsHost { val: Rc::new(RefCell::new(WindowsHostValue { windows: Vec::new(), invalid: Rect::empty() })) }
     }
-    pub fn new_window(&mut self) -> Window {
-        let w = Rc::new(RefCell::new(WindowData::new(Rect::empty())));
+    pub fn new_window(&self) -> Window {
+        let w = Rc::new(RefCell::new(WindowData::new(None)));
         self.val.borrow_mut().windows.push(Rc::clone(&w));
         Window { host: Rc::clone(&self.val), data: w }
     }
-    pub fn scr(&mut self, s: &mut Scr) {
+    pub fn scr(&self, s: &mut Scr) {
+        fn scr_window(window: &mut WindowData, s: &mut Scr, invalid: &mut Rect) {
+            window.scr(s, invalid);
+            for subwindow in window.subwindows.iter_mut() {
+                scr_window(subwindow.borrow_mut().deref_mut(), s, invalid);
+            }
+        }
         let mut ref_mut = self.val.borrow_mut();
         let ref mut b = ref_mut.deref_mut();
         let mut invalid = replace(&mut b.invalid, Rect::empty());
         for w in b.windows.iter_mut() {
-            w.borrow_mut().scr(s, &mut invalid);
+            scr_window(&mut w.borrow_mut(), s, &mut invalid);
         }
     }
 }
@@ -212,17 +240,30 @@ impl Window {
     pub fn out(&self, y: isize, x: isize, c: Texel) {
         self.data.borrow_mut().out(y, x, c);
     }
-    pub fn set_bounds(&mut self, bounds: Rect) {
-        self.host.borrow_mut().invalid.union(*&bounds);
-        self.host.borrow_mut().invalid.union(self.data.borrow_mut().set_bounds(bounds));
+    pub fn set_bounds(&self, bounds: Rect) {
+        self.host.borrow_mut().invalid.union(self.data.borrow().global_bounds());
+        self.data.borrow_mut().set_bounds(bounds);
+        self.host.borrow_mut().invalid.union(self.data.borrow().global_bounds());
+    }
+    pub fn new_sub(&self) -> Window {
+        let w = Rc::new(RefCell::new(WindowData::new(Some(Rc::clone(&self.data)))));
+        self.data.borrow_mut().subwindows.push(Rc::clone(&w));
+        Window { host: Rc::clone(&self.host), data: w }
     }
 }
 
 impl Drop for Window {
     fn drop(&mut self) {
+        fn del_window(windows: &mut Vec<Rc<RefCell<WindowData>>>, window: &Rc<RefCell<WindowData>>) {
+            let i = windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0;
+            windows.remove(i);
+        }
         self.host.borrow_mut().invalid.union(self.data.borrow_mut().set_bounds(Rect::empty()));
-        let i = self.host.borrow_mut().windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, &self.data) }).next().unwrap().0;
-        self.host.borrow_mut().windows.remove(i);
+        if let Some(ref parent) = self.data.borrow().parent {
+            del_window(&mut parent.borrow_mut().subwindows, &self.data);
+        } else {
+            del_window(&mut self.host.borrow_mut().windows, &self.data);
+        };
     }
 }
 
@@ -251,7 +292,9 @@ mod tests {
 
     #[test]
     fn window_scr() {
-        let mut w = WindowData::new(Rect::tlhw(3, 5, 1, 2));
+        let mut w = WindowData::new(None);
+        w.set_bounds(Rect::tlhw(3, 5, 1, 2));
+        assert_eq!(Rect::empty(), w.invalid);
         w.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         w.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         let mut s = TestScr::new(100, 100);
@@ -265,14 +308,14 @@ mod tests {
 
     #[test]
     fn window_set_bounds() {
-        let mut w = WindowData::new(Rect::empty());
+        let mut w = WindowData::new(None);
         w.set_bounds(Rect::tlhw(5, 7, 3, 500));
         assert!(Rect::tlhw(5, 7, 3, 500) == w.bounds);
     }
 
     #[test]
     fn new_window_drop() {
-        let mut host = WindowsHost::new();
+        let host = WindowsHost::new();
         let window_ref = {
             let mut window = host.new_window();
             let window_ref = Rc::downgrade(&window.data);
@@ -287,8 +330,8 @@ mod tests {
     #[test]
     fn windows_host_scr_works() {
         let mut s = TestScr::new(100, 100);
-        let mut host = WindowsHost::new();
-        let mut window = host.new_window();
+        let host = WindowsHost::new();
+        let window = host.new_window();
         window.set_bounds(Rect::tlhw(3, 5, 1, 2));
         host.scr(&mut s);
     }
@@ -296,8 +339,8 @@ mod tests {
     #[test]
     fn windows_host_scr() {
         let mut s = TestScr::new(100, 100);
-        let mut host = WindowsHost::new();
-        let mut window = host.new_window();
+        let host = WindowsHost::new();
+        let window = host.new_window();
         window.set_bounds(Rect::tlhw(3, 5, 1, 2));
         window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
@@ -305,6 +348,25 @@ mod tests {
         assert!('+' == s.content(3, 5).ch, format!("{}", s.content(3, 5).ch));
         assert!('-' == s.content(3, 6).ch, format!("{}", s.content(3, 6).ch));
     }
+
+    #[test]
+    fn subwindow_bounds() {
+        let host = WindowsHost::new();
+        let window = host.new_window();
+        let sub = window.new_sub();
+        sub.set_bounds(Rect::tlhw(1, 1, 1, 1));
+        assert_eq!(Rect::empty(), host.val.borrow().invalid);
+    }
+    //#[test]
+    //fn windows_hierarhy() {
+        //let host = WindowsHost::new();
+        //let window1 = host.new_window();
+        //let window2 = host.new_window();
+        //let sub1 = window1.new_sub();
+        //let sub2 = window2.new_sub();
+        //let sub3 = window2.new_sub();
+        //window1.set_bounds(Rect::tlhw(
+    //}
 
     #[test]
     fn it_works() {
