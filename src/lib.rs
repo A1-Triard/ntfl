@@ -495,16 +495,27 @@ mod tests {
         ], &*scr.content);
     }
 
-    //#[test]
-    //fn windows_hierarhy() {
-        //let host = WindowsHost::new();
-        //let window1 = host.new_window();
-        //let window2 = host.new_window();
-        //let sub1 = window1.new_sub();
-        //let sub2 = window2.new_sub();
-        //let sub3 = window2.new_sub();
-        //window1.set_bounds(Rect::tlhw(5, 12,
-    //}
+    #[test]
+    fn windows_hierarhy() {
+        let mut scr = TestScr::new(4, 4);
+        let host = WindowsHost::new();
+        let window1 = host.new_window();
+        window1.set_bounds(Rect::tlhw(0, 0, 4, 2));
+        let window2 = host.new_window();
+        window2.set_bounds(Rect::tlhw(0, 2, 4, 2));
+        let sub1 = window1.new_sub();
+        sub1.set_bounds(Rect::tlhw(1, 0, 3, 2));
+        let sub2 = window2.new_sub();
+        sub2.set_bounds(Rect::tlhw(0, 0, 3, 2));
+        let sub3 = window2.new_sub();
+        sub3.set_bounds(Rect::tlhw(0, 1, 3, 2));
+        let subsub = sub2.new_sub();
+        subsub.set_bounds(Rect::tlhw(1, 1, 1, 1));
+        window1.out(0, 0, Texel { ch: 'a', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) });
+        window1.out(0, 1, Texel { ch: 'b', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) });
+        sub2.out(0, 0, Texel { ch: 'D', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+        host.scr(&mut scr);
+    }
 
     #[test]
     fn it_works() {
