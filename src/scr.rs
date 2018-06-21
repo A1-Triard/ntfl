@@ -56,10 +56,10 @@ pub trait Scr {
 pub mod tests {
     use std::mem::replace;
     use either::Either;
-    use Attr;
-    use Texel;
-    use Color;
-    use Scr;
+    use scr::Attr;
+    use scr::Texel;
+    use scr::Color;
+    use scr::Scr;
 
     pub struct TestScr {
         pub height: isize,
