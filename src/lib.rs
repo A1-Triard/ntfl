@@ -150,7 +150,7 @@ impl WindowData {
             row.resize(width as usize, Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None });
         }
         self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]);
-        self.invalid = self.invalid.intersection(&bounds); // TODO fix Rect::tlhw(0, 0, height, width)
+        self.invalid = self.invalid.intersection(&Rect::tlhw(0, 0, height, width));
         replace(&mut self.bounds, bounds)
     }
     fn out(&mut self, y: isize, x: isize, c: Texel) {
@@ -262,7 +262,7 @@ impl Drop for Window {
             let i = windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0;
             windows.remove(i);
         }
-        self.host.borrow_mut().invalid.union(self.data.borrow_mut().set_bounds(Rect::empty()));
+        self.host.borrow_mut().invalid.union(self.data.borrow_mut().set_bounds(Rect::empty())); // TODO fix: use global bounds
         if let Some(ref parent) = self.data.borrow().parent {
             del_window(&mut parent.borrow_mut().subwindows, &self.data);
         } else {
@@ -371,6 +371,22 @@ mod tests {
         window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         host.scr(&mut s);
+    }
+
+    #[test]
+    fn set_window_bounds_invalid_crop() {
+        let mut s = TestScr::new(100, 100);
+        let host = WindowsHost::new();
+        let window = host.new_window();
+        window.set_bounds(Rect::tlhw(-10, -20, 30, 40));
+        let sub = window.new_sub();
+        sub.set_bounds(Rect::tlhw(10, 20, 10, 15));
+        host.scr(&mut s);
+        assert_eq!(Rect::empty(), sub.data.borrow().invalid);
+        sub.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+        assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
+        sub.set_bounds(Rect::tlhw(10, 20, 9, 14));
+        assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
     }
 
     //#[test]
