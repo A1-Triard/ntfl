@@ -52,9 +52,6 @@ impl Rect {
             }
         }
     }
-    pub fn clear(&mut self) {
-        self.val = None;
-    }
     pub fn loc(&self) -> Option<(isize, isize)> {
         match self.val {
             None => None,
@@ -117,11 +114,11 @@ impl Rect {
             Rect::empty()
         }
     }
-    pub fn scan<I, R>(&self, mut it: I) -> Option<R> where I : FnMut(isize, isize) -> Option<R> {
+    pub fn scan<I, R>(&self, mut it: I) -> Option<R> where I : FnMut(isize, isize, isize, isize) -> Option<R> {
         if let Some(ref val) = self.val {
-            for y in val.top .. val.bottom() {
-                for x in val.left .. val.right() {
-                    if let Some(r) = it(y, x) { return Some(r); }
+            for y in 0 .. val.height {
+                for x in 0 .. val.width {
+                    if let Some(r) = it(val.top, val.left, y, x) { return Some(r); }
                 }
             }
         }
@@ -156,42 +153,55 @@ impl WindowData {
         self.invalid = self.invalid.intersection(&bounds);
         replace(&mut self.bounds, bounds)
     }
-    fn global_bounds(&self) -> Rect {
-        fn global_offset(window: &WindowData, rect: &mut Rect) {
-            match window.bounds.loc() {
-                None => { rect.clear(); return; }
-                Some((y, x)) => { rect.offset(y, x); }
-            }
+    fn global<T, F>(&self, state: &mut T, f: F) where F : Fn(&WindowData, &mut T) -> bool {
+        fn go<T, F>(window: &WindowData, state: &mut T, f: F) where F : Fn(&WindowData, &mut T) -> bool {
+            if f(window, state) { return; }
             if let Some(ref parent) = window.parent {
-                global_offset(&parent.borrow(), rect);
+                go(&parent.borrow(), state, f);
             }
         }
-        let mut bounds = *&self.bounds;
         if let Some(ref parent) = self.parent {
-            global_offset(&parent.borrow(), &mut bounds);
+            go(&parent.borrow(), state, f);
         }
+    }
+    fn global_bounds(&self) -> Rect {
+        let mut bounds = *&self.bounds;
+        self.global(&mut bounds, |window, rect| {
+            match window.bounds.loc() {
+                None => { replace(rect, Rect::empty()); true }
+                Some((y, x)) => { rect.offset(y, x); false }
+            }
+        });
         bounds
     }
     fn out(&mut self, y: isize, x: isize, c: Texel) {
         self.invalid.include(y, x);
         replace(&mut self.content[y as usize][x as usize], c);
     }
-    fn scr(&mut self, s: &mut Scr, global_invalid: &mut Rect) {
+    fn scr(&mut self, s: &mut Scr, parent_y: isize, parent_x: isize, crop_height: isize, crop_width: isize, global_invalid: &mut Rect) -> Rect {
         let mut invalid = replace(&mut self.invalid, Rect::empty());
-        if let Some((y, x)) = self.bounds.loc() {
-            invalid.offset(y, x);
-            global_invalid.union(invalid);
-            let mut viewport = self.bounds.intersection(global_invalid);
-            viewport.offset(-y, -x);
-            let err = viewport.scan(|yi, xi| {
-                let texel = &self.content[yi as usize][xi as usize];
-                match s.out(y + yi, x + xi, texel) {
-                    Err(()) => Some(()),
-                    Ok(()) => None
+        match self.bounds.loc() {
+            None => Rect::empty(),
+            Some((y, x)) => {
+                let mut bounds = *&self.bounds;
+                bounds.offset(parent_y, parent_x);
+                let viewport = bounds.intersection(&Rect::tlhw(parent_y, parent_x, crop_height, crop_width));
+                invalid.offset(parent_y + y, parent_x + x);
+                global_invalid.union(invalid.intersection(&viewport));
+                let err = viewport.intersection(global_invalid).scan(|y0, x0, yi, xi| {
+                    let texel = &self.content[yi as usize][xi as usize];
+                    match s.out(y0 + yi, x0 + xi, texel) {
+                        Err(()) => Some(()),
+                        Ok(()) => None
+                    }
+                });
+                if let Some(()) = err {
+                    #[cfg(test)]
+                    panic!("NTFL render error occuried!");
+                    #[cfg(not(test))]
+                    eprintln!("NTFL render error occuried!");
                 }
-            });
-            if let Some(()) = err {
-                eprintln!("NTFL render error occuried!");
+                viewport
             }
         }
     }
@@ -221,17 +231,22 @@ impl WindowsHost {
         Window { host: Rc::clone(&self.val), data: w }
     }
     pub fn scr(&self, s: &mut Scr) {
-        fn scr_window(window: &mut WindowData, s: &mut Scr, invalid: &mut Rect) {
-            window.scr(s, invalid);
-            for subwindow in window.subwindows.iter_mut() {
-                scr_window(subwindow.borrow_mut().deref_mut(), s, invalid);
+        fn scr_window(window: &mut WindowData, s: &mut Scr, parent_y: isize, parent_x: isize, crop_height: isize, crop_width: isize, invalid: &mut Rect) {
+            let viewport = window.scr(s, parent_y, parent_x, crop_height, crop_width, invalid);
+            if let Some((y, x)) = viewport.loc() {
+                let (height, width) = viewport.size();
+                for subwindow in window.subwindows.iter_mut() {
+                    scr_window(subwindow.borrow_mut().deref_mut(), s, y, x, height, width, invalid);
+                }
             }
         }
         let mut ref_mut = self.val.borrow_mut();
         let ref mut b = ref_mut.deref_mut();
         let mut invalid = replace(&mut b.invalid, Rect::empty());
+        let height = s.get_height().unwrap();
+        let width = s.get_width().unwrap();
         for w in b.windows.iter_mut() {
-            scr_window(&mut w.borrow_mut(), s, &mut invalid);
+            scr_window(&mut w.borrow_mut(), s, 0, 0, height, width, &mut invalid);
         }
     }
 }
@@ -299,7 +314,7 @@ mod tests {
         w.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         let mut s = TestScr::new(100, 100);
         let mut invalid = Rect::empty();
-        w.scr(&mut s, &mut invalid);
+        w.scr(&mut s, 0, 0, 100, 100, &mut invalid);
         assert!(Some((3, 5)) == invalid.loc());
         assert!((1, 2) == invalid.size(), format!("({}, {})", invalid.size().0, invalid.size().1));
         assert!('+' == s.content(3, 5).ch, format!("{}", s.content(3, 5).ch));
@@ -357,6 +372,18 @@ mod tests {
         sub.set_bounds(Rect::tlhw(1, 1, 1, 1));
         assert_eq!(Rect::empty(), host.val.borrow().invalid);
     }
+
+    #[test]
+    fn outscreen_window() {
+        let mut s = TestScr::new(100, 100);
+        let host = WindowsHost::new();
+        let window = host.new_window();
+        window.set_bounds(Rect::tlhw(-1, -5, 1, 2));
+        window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+        window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+        host.scr(&mut s);
+    }
+
     //#[test]
     //fn windows_hierarhy() {
         //let host = WindowsHost::new();
@@ -365,7 +392,7 @@ mod tests {
         //let sub1 = window1.new_sub();
         //let sub2 = window2.new_sub();
         //let sub3 = window2.new_sub();
-        //window1.set_bounds(Rect::tlhw(
+        //window1.set_bounds(Rect::tlhw(5, 12,
     //}
 
     #[test]
