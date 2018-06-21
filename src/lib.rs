@@ -262,7 +262,7 @@ impl Drop for Window {
             let i = windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0;
             windows.remove(i);
         }
-        self.host.borrow_mut().invalid.union(self.data.borrow_mut().set_bounds(Rect::empty())); // TODO fix: use global bounds
+        self.set_bounds(Rect::empty());
         if let Some(ref parent) = self.data.borrow().parent {
             del_window(&mut parent.borrow_mut().subwindows, &self.data);
         } else {
@@ -379,14 +379,20 @@ mod tests {
         let host = WindowsHost::new();
         let window = host.new_window();
         window.set_bounds(Rect::tlhw(-10, -20, 30, 40));
-        let sub = window.new_sub();
-        sub.set_bounds(Rect::tlhw(10, 20, 10, 15));
-        host.scr(&mut s);
-        assert_eq!(Rect::empty(), sub.data.borrow().invalid);
-        sub.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
-        assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
-        sub.set_bounds(Rect::tlhw(10, 20, 9, 14));
-        assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
+        {
+            let sub = window.new_sub();
+            sub.set_bounds(Rect::tlhw(10, 20, 10, 15));
+            host.scr(&mut s);
+            assert_eq!(Rect::empty(), sub.data.borrow().invalid);
+            sub.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+            assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
+            sub.set_bounds(Rect::tlhw(10, 20, 9, 14));
+            assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
+            assert_eq!(Rect::tlhw(0, 0, 10, 15), host.val.borrow().invalid);
+            host.scr(&mut s);
+            assert_eq!(Rect::empty(), host.val.borrow().invalid);
+        }
+        assert_eq!(Rect::tlhw(0, 0, 9, 14), host.val.borrow().invalid);
     }
 
     //#[test]
