@@ -146,7 +146,7 @@ impl WindowData {
         for row in &mut self.content {
             row.resize(width as usize, Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None });
         }
-        self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; height as usize]);
+        self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]);
         self.invalid = self.invalid.intersection(&bounds);
         replace(&mut self.bounds, bounds)
     }
@@ -282,6 +282,28 @@ mod tests {
         if let Some(window) = window_ref.upgrade() {
             panic!(format!("{}", Rc::strong_count(&window)));
         }
+    }
+
+    #[test]
+    fn windows_host_scr_works() {
+        let mut s = TestScr::new(100, 100);
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
+        window.set_bounds(Rect::tlhw(3, 5, 1, 2));
+        host.scr(&mut s);
+    }
+
+    #[test]
+    fn windows_host_scr() {
+        let mut s = TestScr::new(100, 100);
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
+        window.set_bounds(Rect::tlhw(3, 5, 1, 2));
+        window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+        window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
+        host.scr(&mut s);
+        assert!('+' == s.content(3, 5).ch, format!("{}", s.content(3, 5).ch));
+        assert!('-' == s.content(3, 6).ch, format!("{}", s.content(3, 6).ch));
     }
 
     #[test]
