@@ -10,8 +10,9 @@ pub mod window;
 pub mod draw;
 
 use std::any::Any;
-//use std::borrow::BorrowMut;
-//use std::collections::HashMap;
+use std::borrow::BorrowMut;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry::{ Occupied, Vacant };
 use std::fmt::Debug;
 use std::ptr;
 use std::rc::Rc;
@@ -49,23 +50,20 @@ impl<'a> Val<'a> {
     pub fn to_string(&self) -> String { self.type_.descr.to_string(self) }
 }
 
-//pub struct Fw<'a> {
-    //val_types: HashMap<&'a str, Box<ValTypeDescr>>,
-//}
+pub struct Fw<'a> {
+    val_types: HashMap<&'a str, Box<ValTypeDescr>>,
+}
 
-//impl<'a> Fw<'a> {
-    //pub fn reg_val_type(&mut self, descr: Box<ValTypeDescr>) -> ValType<'a> {
-        //let name = unsafe { &*(descr.name as *const str) };
-        //match self.val_types.entry(name) {
-
-        //}.or_insert(descr).borrow_mut() }
-        ////let r = unsafe { &*(descr.borrow() as *const ValTypeDescr) }; // because HashMap::insert does not return an iterator or something similar
-        ////if self.val_types.insert(r.name(), descr).is_some() {
-            ////panic!("'{}' value type is already registered.");
-        ////}
-        ////ValType { descr: r }
-    //}
-//}
+impl<'a> Fw<'a> {
+    pub fn reg_val_type(&mut self, descr: Box<ValTypeDescr>) -> ValType<'a> {
+        let name = unsafe { &*(descr.name() as *const str) };
+        let ptr = match self.val_types.entry(name) {
+            Occupied(_) => { panic!("'{}' value type is already registered.", name); }
+            Vacant(entry) => entry.insert(descr)
+        }.borrow_mut() as *const ValTypeDescr;
+        ValType { descr: unsafe { &*ptr } }
+    }
+}
 
 #[cfg(test)]
 mod tests {
