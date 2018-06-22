@@ -1,9 +1,9 @@
 #![deny(warnings)]
 
-use std::cell::RefCell;
+use std::cell::{ Ref, RefCell };
 use std::cmp::{ min, max };
 use std::mem::replace;
-use std::ops::DerefMut;
+use std::ops::{ Deref, DerefMut };
 use std::rc::Rc;
 
 use scr::{ Attr, Color, Scr, Texel };
@@ -69,7 +69,7 @@ impl Rect {
             if y <= val.top { val.top = y; } else { val.height = max(val.height, y + 1 - val.top); }
             if x <= val.left { val.left = x; } else { val.width = max(val.width, x + 1 - val.left); }
         } else {
-            self.val = Some(RectValue { top: x, left: y, height: 1, width: 1 });
+            self.val = Some(RectValue { top: y, left: x, height: 1, width: 1 });
         }
     }
     pub fn offset(&mut self, dy: isize, dx: isize) {
@@ -92,7 +92,7 @@ impl Rect {
             }
         }
     }
-    pub fn intersection(&self, r: &Rect) -> Rect {
+    pub fn inters_rect(&self, r: &Rect) -> Rect {
         if let Some(ref val) = self.val {
             if let Some(ref r) = r.val {
                 Rect::tlbr(
@@ -108,11 +108,19 @@ impl Rect {
             Rect::empty()
         }
     }
-    pub fn scan<I, R>(&self, mut it: I) -> Option<R> where I : FnMut(isize, isize, isize, isize) -> Option<R> {
+    pub fn inters_h_line(&self, y: isize, x1: isize, x2: isize) -> Option<(isize, isize)> {
+        self.val.as_ref().and_then(|v| {
+            if y < v.top || y >= v.bottom() { return None; }
+            let x1 = max(x1, v.left);
+            let x2 = min(x2, v.right());
+            if x1 >= x2 { None } else { Some((x1, x2)) }
+        })
+    }
+    pub fn scan<I, R>(&self, mut it: I) -> Option<R> where I : FnMut(isize, isize) -> Option<R> {
         if let Some(ref val) = self.val {
-            for y in 0 .. val.height {
-                for x in 0 .. val.width {
-                    if let Some(r) = it(val.top, val.left, y, x) { return Some(r); }
+            for y in val.top .. val.bottom() {
+                for x in val.left .. val.right() {
+                    if let Some(r) = it(y, x) { return Some(r); }
                 }
             }
         }
@@ -144,7 +152,7 @@ impl WindowData {
             row.resize(width as usize, Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None });
         }
         self.content.resize(height as usize, vec![Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }; width as usize]);
-        self.invalid = self.invalid.intersection(&Rect::tlhw(0, 0, height, width));
+        self.invalid = self.invalid.inters_rect(&Rect::tlhw(0, 0, height, width));
         replace(&mut self.bounds, bounds)
     }
     fn out(&mut self, y: isize, x: isize, c: Texel) {
@@ -158,12 +166,14 @@ impl WindowData {
             Some((y, x)) => {
                 let mut bounds = *&self.bounds;
                 bounds.offset(parent_y, parent_x);
-                let viewport = bounds.intersection(&Rect::tlhw(parent_y, parent_x, crop_height, crop_width));
-                invalid.offset(parent_y + y, parent_x + x);
-                global_invalid.union(invalid.intersection(&viewport));
-                let err = viewport.intersection(global_invalid).scan(|y0, x0, yi, xi| {
-                    let texel = &self.content[yi as usize][xi as usize];
-                    match s.out(y0 + yi, x0 + xi, texel) {
+                let viewport = bounds.inters_rect(&Rect::tlhw(parent_y, parent_x, crop_height, crop_width));
+                let y0 = parent_y + y;
+                let x0 = parent_x + x;
+                invalid.offset(y0, x0);
+                global_invalid.union(invalid.inters_rect(&viewport));
+                let err = viewport.inters_rect(global_invalid).scan(|yi, xi| {
+                    let texel = &self.content[(yi - y0) as usize][(xi - x0) as usize];
+                    match s.out(yi, xi, texel) {
                         Err(()) => Some(()),
                         Ok(()) => None
                     }
@@ -224,9 +234,28 @@ impl WindowsHost {
     }
 }
 
+pub struct WindowBoundsRef<'a> {
+    data: Ref<'a, WindowData>
+}
+
+impl<'a> Deref for WindowBoundsRef<'a> {
+    type Target = Rect;
+
+    fn deref(&self) -> &Rect {
+        &self.data.bounds
+    }
+}
+
 impl Window {
     pub fn out(&self, y: isize, x: isize, c: Texel) {
         self.data.borrow_mut().out(y, x, c);
+    }
+    pub fn bounds(&self) -> WindowBoundsRef {
+        WindowBoundsRef { data: self.data.borrow() }
+    }
+    pub fn area(&self) -> Rect {
+        let (height, width) = self.data.borrow().bounds.size();
+        Rect::tlhw(0, 0, height, width)
     }
     pub fn set_bounds(&self, bounds: Rect) {
         fn global(window: &WindowData, child_y: isize, child_x: isize) -> Option<(isize, isize)> {
@@ -484,6 +513,22 @@ mod tests {
             Texel { ch: '8', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
             Texel { ch: '9', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) },
         ], &*scr.content);
+    }
+
+    #[test]
+    fn double_scr() {
+        let mut scr = TestScr::new(10, 136);
+        let host = WindowsHost::new();
+        let window = host.new_window();
+        window.set_bounds(Rect::tlhw(0, 0, 10, 136));
+        window.out(6, 133, Texel { ch: 'A', attr: Attr::NORMAL, fg: Color::Green, bg: None });
+        window.out(6, 134, Texel { ch: 'B', attr: Attr::NORMAL, fg: Color::Green, bg: None });
+        window.out(6, 135, Texel { ch: 'c', attr: Attr::NORMAL, fg: Color::Green, bg: None });
+        window.out(5, 5, Texel { ch: 'l', attr: Attr::ALTCHARSET | Attr::REVERSE, fg: Color::Green, bg: Some(Color::Black) });
+        host.scr(&mut scr);
+        window.out(6, 2, Texel { ch: 'i', attr: Attr::UNDERLINE, fg: Color::Red, bg: None });
+        host.scr(&mut scr);
+        assert_eq!(Texel { ch: 'i', attr: Attr::UNDERLINE, fg: Color::Red, bg: None }, scr.content[6 * 136 + 2]);
     }
 
     #[test]
