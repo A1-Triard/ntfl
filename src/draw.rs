@@ -22,7 +22,7 @@ pub enum Graph {
     Diamond = '`' as u32 as u8,
     CkBoard = 'a' as u32 as u8,
     Degree = 'f' as u32 as u8,
-    PlMimus = 'g' as u32 as u8,
+    PlMinus = 'g' as u32 as u8,
     Bullet = '~' as u32 as u8,
     LArrow = ',' as u32 as u8,
     RArrow = '+' as u32 as u8,
