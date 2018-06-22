@@ -116,6 +116,14 @@ impl Rect {
             if x1 >= x2 { None } else { Some((x1, x2)) }
         })
     }
+    pub fn inters_v_line(&self, y1: isize, y2: isize, x: isize) -> Option<(isize, isize)> {
+        self.val.as_ref().and_then(|v| {
+            if x < v.left || x >= v.right() { return None; }
+            let y1 = max(y1, v.top);
+            let y2 = min(y2, v.bottom());
+            if y1 >= y2 { None } else { Some((y1, y2)) }
+        })
+    }
     pub fn scan<I, R>(&self, mut it: I) -> Option<R> where I : FnMut(isize, isize) -> Option<R> {
         if let Some(ref val) = self.val {
             for y in val.top .. val.bottom() {
