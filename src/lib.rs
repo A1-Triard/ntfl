@@ -9,6 +9,7 @@ pub mod ncurses;
 pub mod window;
 
 use std::char::from_u32;
+use std::cmp::max;
 use scr::{ Color, Attr, Texel };
 use window::{ Rect, Window };
 
@@ -186,13 +187,27 @@ pub fn draw_border(window: &Window, bounds: &Rect, border: &Border, attr: Attr, 
     }
 }
 
+pub fn draw_text(window: &Window, y: isize, x: isize, text: &str, attr: Attr, fg: Color, bg: Option<Color>) {
+    if y < 0 { return; }
+    let (height, width) = window.bounds().size();
+    if y >= height { return; }
+    let x0 = max(0, x);
+    let mut xi = x0;
+    for c in text.chars().skip((x0 - x) as usize) {
+        if xi >= width { return; }
+        let t = c.texel(attr, fg, bg);
+        window.out(y, xi, t);
+        xi += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use either::{ Left, Right };
     use ncurses::NCurses;
     use scr::{ Scr, Color, Attr };
     use window::{ Rect, WindowsHost };
-    use { draw_border, draw_texel, Border, Graph };
+    use { draw_border, draw_texel, Border, Graph, draw_text };
 
     #[test]
     fn it_works() {
@@ -204,9 +219,7 @@ mod tests {
         window.set_bounds(Rect::tlhw(0, 0, height, width));
         draw_border(&window, &Rect::tlbr(10, 0, 13, 40), &Border::new().ul(&Graph::LTee).ur(&Graph::RTee), Attr::BOLD, Color::Blue, None);
         draw_border(&window, &Rect::tlbr(0, 0, 10, 40), &Border::new().no_bottom(), Attr::BOLD, Color::Blue, None);
-        draw_texel(&window, 6, 133, &'A', Attr::NORMAL, Color::Green, None);
-        draw_texel(&window, 6, 134, &'B', Attr::NORMAL, Color::Green, None);
-        draw_texel(&window, 6, 135, &'c', Attr::NORMAL, Color::Green, None);
+        draw_text(&window, 6, 133, "ABcdefgh", Attr::NORMAL, Color::Green, None);
         draw_texel(&window, 5, 5, &'t', Attr::ALTCHARSET | Attr::REVERSE, Color::Green, Some(Color::Black));
         host.scr(&mut scr);
         scr.refresh(Some((6, 2))).unwrap();
