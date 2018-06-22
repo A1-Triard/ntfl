@@ -62,13 +62,13 @@ impl ToTexel for Graph {
     }
 }
 
-pub fn draw_texel(window: &Window, y: isize, x: isize, t: &ToTexel, attr: Attr, fg: Color, bg: Option<Color>) {
+pub fn draw_texel(window: &mut Window, y: isize, x: isize, t: &ToTexel, attr: Attr, fg: Color, bg: Option<Color>) {
     if window.area().contains(y, x) {
         window.out(y, x, t.texel(attr, fg, bg));
     }
 }
 
-pub fn draw_h_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y: isize, x1: isize, x2: isize, ch: T, attr: Attr, fg: Color, bg: Option<Color>) {
+pub fn draw_h_line<'a, T: Into<Option<&'a ToTexel>>>(window: &mut Window, y: isize, x1: isize, x2: isize, ch: T, attr: Attr, fg: Color, bg: Option<Color>) {
     if let Some((x1, x2)) = window.area().inters_h_line(y, x1, x2) {
         let t = ch.into().unwrap_or(&Graph::HLine).texel(attr, fg, bg);
         for x in x1 .. x2 {
@@ -77,7 +77,7 @@ pub fn draw_h_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y: isize, 
     }
 }
 
-pub fn draw_v_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y1: isize, y2: isize, x: isize, ch: T, attr: Attr, fg: Color, bg: Option<Color>) {
+pub fn draw_v_line<'a, T: Into<Option<&'a ToTexel>>>(window: &mut Window, y1: isize, y2: isize, x: isize, ch: T, attr: Attr, fg: Color, bg: Option<Color>) {
     if let Some((y1, y2)) = window.area().inters_v_line(y1, y2, x) {
         let t = ch.into().unwrap_or(&Graph::VLine).texel(attr, fg, bg);
         for y in y1 .. y2 {
@@ -163,7 +163,7 @@ impl<'b> Border<'b> {
     }
 }
 
-pub fn draw_border(window: &Window, bounds: &Rect, border: &Border, attr: Attr, fg: Color, bg: Option<Color>) {
+pub fn draw_border(window: &mut Window, bounds: &Rect, border: &Border, attr: Attr, fg: Color, bg: Option<Color>) {
     if let Some((y, x)) = bounds.loc() {
         let (height, width) = bounds.size();
         let t = if border.upper.is_none() && border.upper_left.is_none() && border.upper_right.is_none() { 0 } else { 1 };
@@ -181,7 +181,7 @@ pub fn draw_border(window: &Window, bounds: &Rect, border: &Border, attr: Attr, 
     }
 }
 
-pub fn draw_text(window: &Window, y: isize, x: isize, text: &str, attr: Attr, fg: Color, bg: Option<Color>) {
+pub fn draw_text(window: &mut Window, y: isize, x: isize, text: &str, attr: Attr, fg: Color, bg: Option<Color>) {
     if y < 0 { return; }
     let (height, width) = window.bounds().size();
     if y >= height { return; }
@@ -195,7 +195,7 @@ pub fn draw_text(window: &Window, y: isize, x: isize, text: &str, attr: Attr, fg
     }
 }
 
-pub fn fill_rect(window: &Window, rect: &Rect, c: &ToTexel, attr: Attr, fg: Color, bg: Option<Color>) {
+pub fn fill_rect(window: &mut Window, rect: &Rect, c: &ToTexel, attr: Attr, fg: Color, bg: Option<Color>) {
     let rect = window.area().inters_rect(rect);
     let t = c.texel(attr, fg, bg);
     rect.scan(|y, x| {

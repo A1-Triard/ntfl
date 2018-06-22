@@ -216,12 +216,12 @@ impl WindowsHost {
     pub fn new() -> WindowsHost {
         WindowsHost { val: Rc::new(RefCell::new(WindowsHostValue { windows: Vec::new(), invalid: Rect::empty() })) }
     }
-    pub fn new_window(&self) -> Window {
+    pub fn new_window(&mut self) -> Window {
         let w = Rc::new(RefCell::new(WindowData::new(None)));
         self.val.borrow_mut().windows.push(Rc::clone(&w));
         Window { host: Rc::clone(&self.val), data: w }
     }
-    pub fn scr(&self, s: &mut Scr) {
+    pub fn scr(&mut self, s: &mut Scr) {
         fn scr_window(window: &mut WindowData, s: &mut Scr, parent_y: isize, parent_x: isize, crop_height: isize, crop_width: isize, invalid: &mut Rect) {
             let viewport = window.scr(s, parent_y, parent_x, crop_height, crop_width, invalid);
             if let Some((y, x)) = viewport.loc() {
@@ -255,7 +255,7 @@ impl<'a> Deref for WindowBoundsRef<'a> {
 }
 
 impl Window {
-    pub fn out(&self, y: isize, x: isize, c: Texel) {
+    pub fn out(&mut self, y: isize, x: isize, c: Texel) {
         self.data.borrow_mut().out(y, x, c);
     }
     pub fn bounds(&self) -> WindowBoundsRef {
@@ -265,7 +265,7 @@ impl Window {
         let (height, width) = self.data.borrow().bounds.size();
         Rect::tlhw(0, 0, height, width)
     }
-    pub fn set_bounds(&self, bounds: Rect) {
+    pub fn set_bounds(&mut self, bounds: Rect) {
         fn global(window: &WindowData, child_y: isize, child_x: isize) -> Option<(isize, isize)> {
             window.bounds.loc()
                 .map(|(y, x)| (y + child_y, x + child_x))
@@ -280,7 +280,7 @@ impl Window {
             self.host.borrow_mut().invalid.union(new_bounds);
         }
     }
-    pub fn new_sub(&self) -> Window {
+    pub fn new_sub(&mut self) -> Window {
         let w = Rc::new(RefCell::new(WindowData::new(Some(Rc::clone(&self.data)))));
         self.data.borrow_mut().subwindows.push(Rc::clone(&w));
         Window { host: Rc::clone(&self.host), data: w }
@@ -295,7 +295,7 @@ impl Window {
             index(&self.host.borrow().windows, &self.data)
         }
     }
-    pub fn set_z_index(&self, index: usize) {
+    pub fn set_z_index(&mut self, index: usize) {
         fn set_index(windows: &mut Vec<Rc<RefCell<WindowData>>>, window: &Rc<RefCell<WindowData>>, index: usize) {
              let old = windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0;
              let window = windows.remove(old);
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn new_window_drop() {
-        let host = WindowsHost::new();
+        let mut host = WindowsHost::new();
         let window_ref = {
             let mut window = host.new_window();
             let window_ref = Rc::downgrade(&window.data);
@@ -396,8 +396,8 @@ mod tests {
     #[test]
     fn windows_host_scr_works() {
         let mut s = TestScr::new(100, 100);
-        let host = WindowsHost::new();
-        let window = host.new_window();
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
         window.set_bounds(Rect::tlhw(3, 5, 1, 2));
         host.scr(&mut s);
     }
@@ -405,8 +405,8 @@ mod tests {
     #[test]
     fn windows_host_scr() {
         let mut s = TestScr::new(100, 100);
-        let host = WindowsHost::new();
-        let window = host.new_window();
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
         window.set_bounds(Rect::tlhw(3, 5, 1, 2));
         window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
@@ -417,9 +417,9 @@ mod tests {
 
     #[test]
     fn subwindow_bounds() {
-        let host = WindowsHost::new();
-        let window = host.new_window();
-        let sub = window.new_sub();
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
+        let mut sub = window.new_sub();
         sub.set_bounds(Rect::tlhw(1, 1, 1, 1));
         assert_eq!(Rect::empty(), host.val.borrow().invalid);
     }
@@ -427,8 +427,8 @@ mod tests {
     #[test]
     fn outscreen_window() {
         let mut s = TestScr::new(100, 100);
-        let host = WindowsHost::new();
-        let window = host.new_window();
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
         window.set_bounds(Rect::tlhw(-1, -5, 1, 2));
         window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
@@ -438,11 +438,11 @@ mod tests {
     #[test]
     fn set_window_bounds_invalid_crop() {
         let mut s = TestScr::new(100, 100);
-        let host = WindowsHost::new();
-        let window = host.new_window();
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
         window.set_bounds(Rect::tlhw(-10, -20, 30, 40));
         {
-            let sub = window.new_sub();
+            let mut sub = window.new_sub();
             sub.set_bounds(Rect::tlhw(10, 20, 10, 15));
             host.scr(&mut s);
             assert_eq!(Rect::empty(), sub.data.borrow().invalid);
@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn window_z_index() {
-        fn fill3x3(window: &Window, fg: Color) {
+        fn fill3x3(window: &mut Window, fg: Color) {
             window.out(0, 0, Texel { ch: '1', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
             window.out(0, 1, Texel { ch: '2', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
             window.out(0, 2, Texel { ch: '3', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
@@ -471,13 +471,13 @@ mod tests {
             window.out(2, 2, Texel { ch: '9', attr: Attr::NORMAL, fg: fg, bg: Some(Color::Black) });
         }
         let mut scr = TestScr::new(4, 4);
-        let host = WindowsHost::new();
-        let window1 = host.new_window();
+        let mut host = WindowsHost::new();
+        let mut window1 = host.new_window();
         window1.set_bounds(Rect::tlhw(0, 0, 3, 3));
-        fill3x3(&window1, Color::Green);
-        let window2 = host.new_window();
+        fill3x3(&mut window1, Color::Green);
+        let mut window2 = host.new_window();
         window2.set_bounds(Rect::tlhw(1, 1, 3, 3));
-        fill3x3(&window2, Color::Red);
+        fill3x3(&mut window2, Color::Red);
         host.scr(&mut scr);
         assert_eq!([
             Texel { ch: '1', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) },
@@ -526,8 +526,8 @@ mod tests {
     #[test]
     fn double_scr() {
         let mut scr = TestScr::new(10, 136);
-        let host = WindowsHost::new();
-        let window = host.new_window();
+        let mut host = WindowsHost::new();
+        let mut window = host.new_window();
         window.set_bounds(Rect::tlhw(0, 0, 10, 136));
         window.out(6, 133, Texel { ch: 'A', attr: Attr::NORMAL, fg: Color::Green, bg: None });
         window.out(6, 134, Texel { ch: 'B', attr: Attr::NORMAL, fg: Color::Green, bg: None });
@@ -542,18 +542,18 @@ mod tests {
     #[test]
     fn windows_hierarhy() {
         let mut scr = TestScr::new(4, 4);
-        let host = WindowsHost::new();
-        let window1 = host.new_window();
+        let mut host = WindowsHost::new();
+        let mut window1 = host.new_window();
         window1.set_bounds(Rect::tlhw(0, 0, 4, 2));
-        let window2 = host.new_window();
+        let mut window2 = host.new_window();
         window2.set_bounds(Rect::tlhw(0, 2, 4, 2));
-        let sub1 = window1.new_sub();
+        let mut sub1 = window1.new_sub();
         sub1.set_bounds(Rect::tlhw(1, 0, 3, 2));
-        let sub2 = window2.new_sub();
+        let mut sub2 = window2.new_sub();
         sub2.set_bounds(Rect::tlhw(0, 0, 3, 2));
-        let sub3 = window2.new_sub();
+        let mut sub3 = window2.new_sub();
         sub3.set_bounds(Rect::tlhw(0, 1, 3, 2));
-        let subsub = sub2.new_sub();
+        let mut subsub = sub2.new_sub();
         subsub.set_bounds(Rect::tlhw(1, 1, 1, 1));
         window1.out(0, 0, Texel { ch: 'a', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) });
         window1.out(0, 1, Texel { ch: 'b', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) });
