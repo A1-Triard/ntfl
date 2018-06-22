@@ -244,14 +244,17 @@ mod tests {
         loop {
             n = !n;
             match scr.getch().unwrap() {
-                Left(_) => { break; }
+                Left(_) => {
+                    window.set_z_index(1 - window.z_index());
+                }
+                Right('\n') => { break; }
                 Right(c) => {
                     fill_rect(&bg, &bg.area(), &' ', Attr::NORMAL, Color::Black, if n { Some(Color::Green) } else { None });
                     draw_texel(&window, 1, 1, &c, Attr::UNDERLINE, Color::Red, None);
-                    host.scr(&mut scr);
-                    scr.refresh(None).unwrap();
                 }
             }
+            host.scr(&mut scr);
+            scr.refresh(None).unwrap();
         }
     }
 }
