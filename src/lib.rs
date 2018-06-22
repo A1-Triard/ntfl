@@ -77,7 +77,7 @@ pub fn draw_texel(window: &Window, y: isize, x: isize, t: &ToTexel, attr: Attr, 
     }
 }
 
-pub fn draw_h_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y: isize, x1: isize, x2: isize, attr: Attr, fg: Color, bg: Option<Color>, ch: T) {
+pub fn draw_h_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y: isize, x1: isize, x2: isize, ch: T, attr: Attr, fg: Color, bg: Option<Color>) {
     if let Some((x1, x2)) = window.area().inters_h_line(y, x1, x2) {
         let t = ch.into().unwrap_or(&Graph::HLine).texel(attr, fg, bg);
         for x in x1 .. x2 {
@@ -86,7 +86,7 @@ pub fn draw_h_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y: isize, 
     }
 }
 
-pub fn draw_v_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y1: isize, y2: isize, x: isize, attr: Attr, fg: Color, bg: Option<Color>, ch: T) {
+pub fn draw_v_line<'a, T: Into<Option<&'a ToTexel>>>(window: &Window, y1: isize, y2: isize, x: isize, ch: T, attr: Attr, fg: Color, bg: Option<Color>) {
     if let Some((y1, y2)) = window.area().inters_v_line(y1, y2, x) {
         let t = ch.into().unwrap_or(&Graph::VLine).texel(attr, fg, bg);
         for y in y1 .. y2 {
@@ -172,13 +172,13 @@ impl<'b> Border<'b> {
     }
 }
 
-pub fn draw_border(window: &Window, bounds: &Rect, attr: Attr, fg: Color, bg: Option<Color>, border: &Border) {
+pub fn draw_border(window: &Window, bounds: &Rect, border: &Border, attr: Attr, fg: Color, bg: Option<Color>) {
     if let Some((y, x)) = bounds.loc() {
         let (height, width) = bounds.size();
-        if let Some(t) = border.upper { draw_h_line(window, y, x + 1, x + width, attr, fg, bg, t); }
-        if let Some(t) = border.lower { draw_h_line(window, y + height, x + 1, x + width, attr, fg, bg, t); }
-        if let Some(t) = border.left { draw_v_line(window, y + 1, y + height, x, attr, fg, bg, t); }
-        if let Some(t) = border.right { draw_v_line(window, y + 1, y + height, x + width, attr, fg, bg, t); }
+        if let Some(t) = border.upper { draw_h_line(window, y, x + 1, x + width, t, attr, fg, bg); }
+        if let Some(t) = border.lower { draw_h_line(window, y + height, x + 1, x + width, t, attr, fg, bg); }
+        if let Some(t) = border.left { draw_v_line(window, y + 1, y + height, x, t, attr, fg, bg); }
+        if let Some(t) = border.right { draw_v_line(window, y + 1, y + height, x + width, t, attr, fg, bg); }
         if let Some(t) = border.upper_left { draw_texel(window, y, x, t, attr, fg, bg); }
         if let Some(t) = border.upper_right { draw_texel(window, y, x + width, t, attr, fg, bg); }
         if let Some(t) = border.lower_left { draw_texel(window, y + height, x, t, attr, fg, bg); }
@@ -202,8 +202,8 @@ mod tests {
         let height = scr.get_height().unwrap();
         let width = scr.get_width().unwrap();
         window.set_bounds(Rect::tlhw(0, 0, height, width));
-        draw_border(&window, &Rect::tlbr(10, 0, 13, 40), Attr::BOLD, Color::Blue, None, &Border::new().ul(&Graph::LTee).ur(&Graph::RTee));
-        draw_border(&window, &Rect::tlbr(0, 0, 10, 40), Attr::BOLD, Color::Blue, None, &Border::new().no_bottom());
+        draw_border(&window, &Rect::tlbr(10, 0, 13, 40), &Border::new().ul(&Graph::LTee).ur(&Graph::RTee), Attr::BOLD, Color::Blue, None);
+        draw_border(&window, &Rect::tlbr(0, 0, 10, 40), &Border::new().no_bottom(), Attr::BOLD, Color::Blue, None);
         draw_texel(&window, 6, 133, &'A', Attr::NORMAL, Color::Green, None);
         draw_texel(&window, 6, 134, &'B', Attr::NORMAL, Color::Green, None);
         draw_texel(&window, 6, 135, &'c', Attr::NORMAL, Color::Green, None);
