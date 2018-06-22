@@ -55,6 +55,9 @@ pub struct Fw<'a> {
 }
 
 impl<'a> Fw<'a> {
+    pub fn new() -> Fw<'a> {
+        Fw { val_types: HashMap::new() }
+    }
     pub fn reg_val_type(&mut self, descr: Box<ValTypeDescr>) -> ValType<'a> {
         let name = unsafe { &*(descr.name() as *const str) };
         let ptr = match self.val_types.entry(name) {
