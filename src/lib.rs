@@ -100,15 +100,15 @@ pub struct Border<'a> {
     pub upper_right: Option<&'a ToTexel>,
     pub lower_left: Option<&'a ToTexel>,
     pub lower_right: Option<&'a ToTexel>,
-    pub upper: Option<&'a ToTexel>,
-    pub lower: Option<&'a ToTexel>,
+    pub top: Option<&'a ToTexel>,
+    pub bottom: Option<&'a ToTexel>,
     pub left: Option<&'a ToTexel>,
     pub right: Option<&'a ToTexel>,
 }
 
 impl<'b> Border<'b> {
     pub fn new() -> Border<'b> {
-        Border { upper_left: Some(&Graph::ULCorner), upper_right: Some(&Graph::URCorner), lower_left: Some(&Graph::LLCorner), lower_right: Some(&Graph::LRCorner), upper: Some(&Graph::HLine), lower: Some(&Graph::HLine), left: Some(&Graph::VLine), right: Some(&Graph::VLine) }
+        Border { upper_left: Some(&Graph::ULCorner), upper_right: Some(&Graph::URCorner), lower_left: Some(&Graph::LLCorner), lower_right: Some(&Graph::LRCorner), top: Some(&Graph::HLine), bottom: Some(&Graph::HLine), left: Some(&Graph::VLine), right: Some(&Graph::VLine) }
     }
     pub fn no_ul(&self) -> Border<'b> {
         Border { upper_left: None, ..*self }
@@ -134,13 +134,37 @@ impl<'b> Border<'b> {
     pub fn lr(&self, t: &'b ToTexel) -> Border<'b> {
         Border { lower_right: Some(t), ..*self }
     }
+    pub fn no_top(&self) -> Border<'b> {
+        Border { top: None, ..*self }
+    }
+    pub fn top(&self, t: &'b ToTexel) -> Border<'b> {
+        Border { top: Some(t), ..*self }
+    }
+    pub fn no_bottom(&self) -> Border<'b> {
+        Border { bottom: None, ..*self }
+    }
+    pub fn bottom(&self, t: &'b ToTexel) -> Border<'b> {
+        Border { bottom: Some(t), ..*self }
+    }
+    pub fn no_left(&self) -> Border<'b> {
+        Border { left: None, ..*self }
+    }
+    pub fn left(&self, t: &'b ToTexel) -> Border<'b> {
+        Border { left: Some(t), ..*self }
+    }
+    pub fn no_right(&self) -> Border<'b> {
+        Border { right: None, ..*self }
+    }
+    pub fn right(&self, t: &'b ToTexel) -> Border<'b> {
+        Border { right: Some(t), ..*self }
+    }
 }
 
 pub fn draw_border(window: &Window, bounds: &Rect, attr: Attr, fg: Color, bg: Option<Color>, border: &Border) {
     if let Some((y, x)) = bounds.loc() {
         let (height, width) = bounds.size();
-        if let Some(t) = border.upper { draw_h_line(window, y, x + 1, x + width, attr, fg, bg, t); }
-        if let Some(t) = border.lower { draw_h_line(window, y + height, x + 1, x + width, attr, fg, bg, t); }
+        if let Some(t) = border.top { draw_h_line(window, y, x + 1, x + width, attr, fg, bg, t); }
+        if let Some(t) = border.bottom { draw_h_line(window, y + height, x + 1, x + width, attr, fg, bg, t); }
         if let Some(t) = border.left { draw_v_line(window, y + 1, y + height, x, attr, fg, bg, t); }
         if let Some(t) = border.right { draw_v_line(window, y + 1, y + height, x + width, attr, fg, bg, t); }
         if let Some(t) = border.upper_left { draw_texel(window, y, x, t, attr, fg, bg); }
