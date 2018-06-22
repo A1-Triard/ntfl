@@ -176,14 +176,18 @@ impl<'b> Border<'b> {
 pub fn draw_border(window: &Window, bounds: &Rect, border: &Border, attr: Attr, fg: Color, bg: Option<Color>) {
     if let Some((y, x)) = bounds.loc() {
         let (height, width) = bounds.size();
-        if let Some(t) = border.upper { draw_h_line(window, y, x + 1, x + width, t, attr, fg, bg); }
-        if let Some(t) = border.lower { draw_h_line(window, y + height, x + 1, x + width, t, attr, fg, bg); }
-        if let Some(t) = border.left { draw_v_line(window, y + 1, y + height, x, t, attr, fg, bg); }
-        if let Some(t) = border.right { draw_v_line(window, y + 1, y + height, x + width, t, attr, fg, bg); }
-        if let Some(t) = border.upper_left { draw_texel(window, y, x, t, attr, fg, bg); }
-        if let Some(t) = border.upper_right { draw_texel(window, y, x + width, t, attr, fg, bg); }
-        if let Some(t) = border.lower_left { draw_texel(window, y + height, x, t, attr, fg, bg); }
-        if let Some(t) = border.lower_right { draw_texel(window, y + height, x + width, t, attr, fg, bg); }
+        let t = if border.upper.is_none() && border.upper_left.is_none() && border.upper_right.is_none() { 0 } else { 1 };
+        let l = if border.left.is_none() && border.upper_left.is_none() && border.lower_left.is_none() { 0 } else { 1 };
+        let b = if border.lower.is_none() && border.lower_left.is_none() && border.lower_right.is_none() { 0 } else { 1 };
+        let r = if border.right.is_none() && border.upper_right.is_none() && border.lower_right.is_none() { 0 } else { 1 };
+        if let Some(c) = border.upper { draw_h_line(window, y, x + l, x + width - r, c, attr, fg, bg); }
+        if let Some(c) = border.lower { draw_h_line(window, y + height - b, x + l, x + width - r, c, attr, fg, bg); }
+        if let Some(c) = border.left { draw_v_line(window, y + t, y + height - b, x, c, attr, fg, bg); }
+        if let Some(c) = border.right { draw_v_line(window, y + t, y + height - b, x + width - r, c, attr, fg, bg); }
+        if let Some(c) = border.upper_left { draw_texel(window, y, x, c, attr, fg, bg); }
+        if let Some(c) = border.upper_right { draw_texel(window, y, x + width - 1, c, attr, fg, bg); }
+        if let Some(c) = border.lower_left { draw_texel(window, y + height - 1, x, c, attr, fg, bg); }
+        if let Some(c) = border.lower_right { draw_texel(window, y + height - 1, x + width - 1, c, attr, fg, bg); }
     }
 }
 
@@ -201,35 +205,52 @@ pub fn draw_text(window: &Window, y: isize, x: isize, text: &str, attr: Attr, fg
     }
 }
 
+pub fn fill_rect(window: &Window, rect: &Rect, c: &ToTexel, attr: Attr, fg: Color, bg: Option<Color>) {
+    let rect = window.area().inters_rect(rect);
+    let t = c.texel(attr, fg, bg);
+    rect.scan(|y, x| {
+        window.out(y, x, t);
+        let continue_: Option<()> = None;
+        continue_
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use either::{ Left, Right };
     use ncurses::NCurses;
     use scr::{ Scr, Color, Attr };
     use window::{ Rect, WindowsHost };
-    use { draw_border, draw_texel, Border, Graph, draw_text };
+    use { draw_border, draw_texel, Border, Graph, draw_text, fill_rect };
 
     #[test]
     fn it_works() {
         let mut scr = NCurses::new().unwrap();
         let host = WindowsHost::new();
-        let window = host.new_window();
         let height = scr.get_height().unwrap();
         let width = scr.get_width().unwrap();
-        window.set_bounds(Rect::tlhw(0, 0, height, width));
+        let bg = host.new_window();
+        bg.set_bounds(Rect::tlhw(0, 0, height, width));
+        fill_rect(&bg, &bg.area(), &' ', Attr::NORMAL, Color::Black, None);
+        let window = host.new_window();
+        window.set_bounds(Rect::tlhw(0, 0, 13, 40));
+        fill_rect(&window, &window.area(), &' ', Attr::NORMAL, Color::Black, None);
         draw_border(&window, &Rect::tlbr(10, 0, 13, 40), &Border::new().ul(&Graph::LTee).ur(&Graph::RTee), Attr::BOLD, Color::Blue, None);
         draw_border(&window, &Rect::tlbr(0, 0, 10, 40), &Border::new().no_bottom(), Attr::BOLD, Color::Blue, None);
-        draw_text(&window, 6, 133, "ABcdefgh", Attr::NORMAL, Color::Green, None);
-        draw_texel(&window, 5, 5, &'t', Attr::ALTCHARSET | Attr::REVERSE, Color::Green, Some(Color::Black));
+        draw_text(&window, 1, 1, "Aыcdefgh", Attr::NORMAL, Color::Green, None);
         host.scr(&mut scr);
-        scr.refresh(Some((6, 2))).unwrap();
-        match scr.getch().unwrap() {
-            Left(_) => { }
-            Right(c) => {
-                draw_texel(&window, 6, 2, &c, Attr::UNDERLINE, Color::Red, None);
-                host.scr(&mut scr);
-                scr.refresh(None).unwrap();
-                scr.getch().unwrap();
+        scr.refresh(Some((1, 1))).unwrap();
+        let mut n = false;
+        loop {
+            n = !n;
+            match scr.getch().unwrap() {
+                Left(_) => { break; }
+                Right(c) => {
+                    fill_rect(&bg, &bg.area(), &' ', Attr::NORMAL, Color::Black, if n { Some(Color::Green) } else { None });
+                    draw_texel(&window, 1, 1, &c, Attr::UNDERLINE, Color::Red, None);
+                    host.scr(&mut scr);
+                    scr.refresh(None).unwrap();
+                }
             }
         }
     }
