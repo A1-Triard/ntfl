@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 pub trait ValTypeDescr : Debug {
     fn name(&self) -> &str;
-    fn parse(&self, type_: ValType, s: &str) -> Option<Rc<Val>>;
+    fn parse<'a>(&self, type_: ValType<'a>, s: &str) -> Option<Rc<Val<'a>>>;
     fn to_string(&self, val: &Val) -> String;
 }
 
@@ -36,7 +36,7 @@ impl<'a> Eq for ValType<'a> { }
 impl<'a> ValType<'a> {
     pub fn name(&self) -> &str { self.descr.name() }
     pub fn parse(&self, s: &str) -> Option<Rc<Val>> { self.descr.parse(*self, s) }
-    pub fn box_<T: 'static>(&self, val: T) -> Rc<Val> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
+    pub fn box_<T: 'static>(&self, val: T) -> Rc<Val<'a>> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
 }
 
 pub struct Val<'a> {
@@ -75,6 +75,31 @@ mod tests {
     use scr::{ Scr, Color, Attr };
     use window::{ Rect, WindowsHost };
     use draw::{ draw_border, draw_texel, Border, Graph, draw_text, fill_rect };
+
+    use std::rc::Rc;
+    use ValTypeDescr;
+    use ValType;
+    use Val;
+    use Fw;
+
+    #[derive(Debug)]
+    struct StrValTypeDescr { }
+    impl ValTypeDescr for StrValTypeDescr {
+        fn name(&self) -> &str { &"str" }
+        fn parse<'a>(&self, type_: ValType<'a>, s: &str) -> Option<Rc<Val<'a>>> {
+            Some(type_.box_(String::from(s)))
+        }
+        fn to_string(&self, val: &Val) -> String { val.unbox::<String>().clone() }
+    }
+
+    #[test]
+    fn reg_val_type_test() {
+        let mut fw = Fw::new();
+        let str_type = fw.reg_val_type(Box::new(StrValTypeDescr { }));
+        assert_eq!("123", str_type.parse(&"123").unwrap().unbox::<String>());
+        assert_eq!("123", str_type.box_(String::from("123")).to_string());
+        assert_eq!("str", str_type.name());
+    }
 
     #[test]
     fn it_works() {
