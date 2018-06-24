@@ -24,47 +24,70 @@ pub trait ValTypeDescr : Debug {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct ValType<'a> {
-    descr: &'a ValTypeDescr,
+pub struct ValType<'fw> {
+    descr: &'fw ValTypeDescr,
 }
 
-impl<'a> PartialEq for ValType<'a> {
+impl<'fw> PartialEq for ValType<'fw> {
     fn eq(&self, other: &ValType) -> bool { ptr::eq(self.descr, other.descr) }
 }
-impl<'a> Eq for ValType<'a> { }
+impl<'fw> Eq for ValType<'fw> { }
 
-impl<'a> ValType<'a> {
+impl<'fw> ValType<'fw> {
     pub fn name(&self) -> &str { self.descr.name() }
     pub fn parse(&self, s: &str) -> Option<Rc<Val>> { self.descr.parse(*self, s) }
-    pub fn box_<T: 'static>(&self, val: T) -> Rc<Val<'a>> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
+    pub fn box_<T: 'static>(&self, val: T) -> Rc<Val<'fw>> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
 }
 
-pub struct Val<'a> {
-    type_: ValType<'a>,
+pub struct Val<'fw> {
+    type_: ValType<'fw>,
     unbox: Box<Any>,
 }
 
-impl<'a> Val<'a> {
+impl<'fw> Val<'fw> {
     pub fn type_(&self) -> ValType { self.type_ }
     pub fn unbox<T: 'static>(&self) -> &T { self.unbox.downcast_ref().unwrap() }
     pub fn to_string(&self) -> String { self.type_.descr.to_string(self) }
 }
 
-pub struct Fw<'a> {
-    val_types: HashMap<&'a str, Box<ValTypeDescr>>,
+//struct DepProp {
+//}
+
+pub struct DepType<'fw> {
+    base: Option<&'fw DepType<'fw>>,
+    name: String,
 }
 
-impl<'a> Fw<'a> {
-    pub fn new() -> Fw<'a> {
-        Fw { val_types: HashMap::new() }
+impl<'fw> DepType<'fw> {
+    pub fn name(&self) -> &str { &self.name }
+    pub fn base(&self) -> Option<&'fw DepType> { self.base }
+}
+
+pub struct Fw<'fw> {
+    val_types: HashMap<&'fw str, Box<ValTypeDescr>>,
+    dep_types: HashMap<&'fw str, Box<DepType<'fw>>>,
+}
+
+impl<'fw> Fw<'fw> {
+    pub fn new() -> Fw<'fw> {
+        Fw { val_types: HashMap::new(), dep_types: HashMap::new() }
     }
-    pub fn reg_val_type(&mut self, descr: Box<ValTypeDescr>) -> ValType<'a> {
+    pub fn reg_val_type(&mut self, descr: Box<ValTypeDescr>) -> ValType<'fw> {
         let name = unsafe { &*(descr.name() as *const str) };
         let ptr = match self.val_types.entry(name) {
             Occupied(_) => { panic!("'{}' value type is already registered.", name); }
             Vacant(entry) => entry.insert(descr)
         }.borrow_mut() as *const ValTypeDescr;
         ValType { descr: unsafe { &*ptr } }
+    }
+    pub fn reg_dep_type(&mut self, name: String, base: Option<&'fw DepType>) -> &'fw DepType {
+        let type_ = Box::new(DepType { base: base, name: name });
+        let name = unsafe { &*(&type_.name[..] as *const str) };
+        let ptr = match self.dep_types.entry(name) {
+            Occupied(_) => { panic!("'{}' dependency type is already registered.", name); }
+            Vacant(entry) => entry.insert(type_)
+        }.borrow_mut() as *const DepType;
+        unsafe { &*ptr }
     }
 }
 
@@ -86,7 +109,7 @@ mod tests {
     struct StrValTypeDescr { }
     impl ValTypeDescr for StrValTypeDescr {
         fn name(&self) -> &str { &"str" }
-        fn parse<'a>(&self, type_: ValType<'a>, s: &str) -> Option<Rc<Val<'a>>> {
+        fn parse<'fw>(&self, type_: ValType<'fw>, s: &str) -> Option<Rc<Val<'fw>>> {
             Some(type_.box_(String::from(s)))
         }
         fn to_string(&self, val: &Val) -> String { val.unbox::<String>().clone() }
