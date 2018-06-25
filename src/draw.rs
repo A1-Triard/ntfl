@@ -46,7 +46,7 @@ pub trait ToTexel {
 
 impl ToTexel for Texel {
     fn texel(&self, _: Attr, _: Color, _: Option<Color>) -> Texel {
-        *self
+        self.clone()
     }
 }
 
@@ -72,7 +72,7 @@ pub fn draw_h_line<'a, T: Into<Option<&'a ToTexel>>>(window: &mut Window, y: isi
     if let Some((x1, x2)) = window.area().inters_h_line(y, x1, x2) {
         let t = ch.into().unwrap_or(&Graph::HLine).texel(attr, fg, bg);
         for x in x1 .. x2 {
-            window.out(y, x, t);
+            window.out(y, x, t.clone());
         }
     }
 }
@@ -81,7 +81,7 @@ pub fn draw_v_line<'a, T: Into<Option<&'a ToTexel>>>(window: &mut Window, y1: is
     if let Some((y1, y2)) = window.area().inters_v_line(y1, y2, x) {
         let t = ch.into().unwrap_or(&Graph::VLine).texel(attr, fg, bg);
         for y in y1 .. y2 {
-            window.out(y, x, t);
+            window.out(y, x, t.clone());
         }
     }
 }
@@ -199,7 +199,7 @@ pub fn fill_rect(window: &mut Window, rect: &Rect, c: &ToTexel, attr: Attr, fg: 
     let rect = window.area().inters_rect(rect);
     let t = c.texel(attr, fg, bg);
     rect.scan(|y, x| {
-        window.out(y, x, t);
+        window.out(y, x, t.clone());
         let continue_: Option<()> = None;
         continue_
     });

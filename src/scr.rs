@@ -36,7 +36,7 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Texel {
     pub ch: char,
     pub attr: Attr,
@@ -87,7 +87,7 @@ pub mod tests {
         fn get_width(&self) -> Result<isize, ()> { Ok(self.width) }
         fn out(&mut self, y: isize, x: isize, c: &Texel) -> Result<(), ()> {
             self.invalid = true;
-            replace(&mut self.content[(y * self.width + x) as usize], *c);
+            replace(&mut self.content[(y * self.width + x) as usize], c.clone());
             Ok(())
         }
         fn refresh(&mut self, cursor: Option<(isize, isize)>) -> Result<(), ()> {

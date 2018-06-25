@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use scr::{ Attr, Color, Scr, Texel };
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 struct RectValue {
     top: isize,
     left: isize,
@@ -21,7 +21,7 @@ impl RectValue {
     pub fn right(&self) -> isize { self.left + self.width }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Rect {
     val: Option<RectValue>,
 }
@@ -172,7 +172,7 @@ impl WindowData {
         match self.bounds.loc() {
             None => Rect::empty(),
             Some((y, x)) => {
-                let mut bounds = *&self.bounds;
+                let mut bounds = self.bounds.clone();
                 bounds.offset(parent_y, parent_x);
                 let viewport = bounds.inters_rect(&Rect::tlhw(parent_y, parent_x, crop_height, crop_width));
                 let y0 = parent_y + y;
@@ -271,7 +271,7 @@ impl Window {
                 .map(|(y, x)| (y + child_y, x + child_x))
                 .and_then(|(y, x)| window.parent.as_ref().map_or(Some((y, x)), |parent| global(&parent.borrow(), y, x)))
         }
-        let mut new_bounds = *&bounds;
+        let mut new_bounds = bounds.clone();
         let mut old_bounds = self.data.borrow_mut().set_bounds(bounds);
         if let Some((parent_y, parent_x)) = self.data.borrow().parent.as_ref().map_or(Some((0, 0)), |parent| global(&parent.borrow(), 0, 0)) {
             old_bounds.offset(parent_y, parent_x);
@@ -307,7 +307,7 @@ impl Window {
                 .map(|(y, x)| (y + child_y, x + child_x))
                 .and_then(|(y, x)| window.parent.as_ref().map_or(Some((y, x)), |parent| global(&parent.borrow(), y, x)))
         }
-        let mut bounds = *&self.data.borrow().bounds;
+        let mut bounds = self.data.borrow().bounds.clone();
         if let Some((parent_y, parent_x)) = self.data.borrow().parent.as_ref().map_or(Some((0, 0)), |parent| global(&parent.borrow(), 0, 0)) {
             bounds.offset(parent_y, parent_x);
             self.host.borrow_mut().invalid.union(bounds);

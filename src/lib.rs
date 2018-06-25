@@ -10,84 +10,143 @@ pub mod window;
 pub mod draw;
 
 use std::any::Any;
-use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{ Occupied, Vacant };
 use std::fmt::Debug;
-use std::ptr;
 use std::rc::Rc;
 
-pub trait ValTypeDescr : Debug {
+pub trait ValTypeDesc : Debug {
     fn name(&self) -> &str;
-    fn parse<'a>(&self, type_: ValType<'a>, s: &str) -> Option<Rc<Val<'a>>>;
+    fn parse<'a>(&self, type_: ValType, s: &str) -> Option<Rc<Val>>;
     fn to_string(&self, val: &Val) -> String;
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct ValType<'fw> {
-    descr: &'fw ValTypeDescr,
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct ValType {
+    index: usize
 }
 
-impl<'fw> PartialEq for ValType<'fw> {
-    fn eq(&self, other: &ValType) -> bool { ptr::eq(self.descr, other.descr) }
-}
-impl<'fw> Eq for ValType<'fw> { }
-
-impl<'fw> ValType<'fw> {
-    pub fn name(&self) -> &str { self.descr.name() }
-    pub fn parse(&self, s: &str) -> Option<Rc<Val>> { self.descr.parse(*self, s) }
-    pub fn box_<T: 'static>(&self, val: T) -> Rc<Val<'fw>> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
+impl ValType {
+    pub fn box_<T: 'static>(&self, val: T) -> Rc<Val> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
 }
 
-pub struct Val<'fw> {
-    type_: ValType<'fw>,
+pub struct Val {
+    type_: ValType,
     unbox: Box<Any>,
 }
 
-impl<'fw> Val<'fw> {
+impl Val {
     pub fn type_(&self) -> ValType { self.type_ }
     pub fn unbox<T: 'static>(&self) -> &T { self.unbox.downcast_ref().unwrap() }
-    pub fn to_string(&self) -> String { self.type_.descr.to_string(self) }
 }
 
-//struct DepProp {
-//}
-
-pub struct DepType<'fw> {
-    base: Option<&'fw DepType<'fw>>,
+#[derive(Debug)]
+struct DepTypeDesc {
+    base: Option<DepType>,
     name: String,
+    props: Vec<DepPropDesc>,
+    props_by_name: HashMap<String, DepProp>,
 }
 
-impl<'fw> DepType<'fw> {
-    pub fn name(&self) -> &str { &self.name }
-    pub fn base(&self) -> Option<&'fw DepType> { self.base }
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct DepType {
+    index: usize
 }
 
-pub struct Fw<'fw> {
-    val_types: HashMap<&'fw str, Box<ValTypeDescr>>,
-    dep_types: HashMap<&'fw str, Box<DepType<'fw>>>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Type {
+    Val(ValType),
+    Dep(DepType),
 }
 
-impl<'fw> Fw<'fw> {
-    pub fn new() -> Fw<'fw> {
-        Fw { val_types: HashMap::new(), dep_types: HashMap::new() }
+#[derive(Debug)]
+struct DepPropDesc {
+    name: String,
+    val_type: Type,
+    attached: Option<DepType>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct DepProp {
+    owner: DepType,
+    index: usize,
+}
+
+impl DepProp {
+    pub fn owner(&self) -> DepType { self.owner }
+}
+
+pub struct Fw {
+    val_types: Vec<Box<ValTypeDesc>>,
+    val_types_by_name: HashMap<String, ValType>,
+    dep_types: Vec<DepTypeDesc>,
+    dep_types_by_name: HashMap<String, DepType>,
+}
+
+impl Fw {
+    pub fn new() -> Fw {
+        Fw { val_types: Vec::new(), val_types_by_name: HashMap::new(), dep_types: Vec::new(), dep_types_by_name: HashMap::new() }
     }
-    pub fn reg_val_type(&mut self, descr: Box<ValTypeDescr>) -> ValType<'fw> {
-        let name = unsafe { &*(descr.name() as *const str) };
-        let ptr = match self.val_types.entry(name) {
+    pub fn val_type(&self, name: &str) -> Option<ValType> {
+        self.val_types_by_name.get(name).map(|x| { *x })
+    }
+    pub fn val_type_name(&self, val_type: ValType) -> &str {
+        self.val_types[val_type.index].name()
+    }
+    pub fn parse(&self, val_type: ValType, s: &str) -> Option<Rc<Val>> {
+        self.val_types[val_type.index].parse(val_type, s)
+    }
+    pub fn to_string(&self, val: &Val) -> String {
+        self.val_types[val.type_.index].to_string(val)
+    }
+    pub fn dep_type(&self, name: &str) -> Option<DepType> {
+        self.dep_types_by_name.get(name).map(|x| { *x })
+    }
+    pub fn dep_type_name(&self, dep_type: DepType) -> &str {
+        &self.dep_types[dep_type.index].name
+    }
+    pub fn base(&self, dep_type: DepType) -> Option<DepType> {
+        self.dep_types[dep_type.index].base
+    }
+    pub fn dep_prop_name(&self, dep_prop: DepProp) -> &str {
+        &self.dep_types[dep_prop.owner.index].props[dep_prop.index].name[..]
+    }
+    pub fn dep_prop_val_type(&self, dep_prop: DepProp) -> &Type {
+        &self.dep_types[dep_prop.owner.index].props[dep_prop.index].val_type
+    }
+    pub fn dep_prop_attached(&self, dep_prop: DepProp) -> Option<DepType> {
+        self.dep_types[dep_prop.owner.index].props[dep_prop.index].attached
+    }
+    pub fn reg_val_type(&mut self, desc: Box<ValTypeDesc>) -> ValType {
+        self.val_types.push(desc);
+        let val_type = ValType { index: self.val_types.len() - 1 };
+        let name = self.val_types[val_type.index].name();
+        match self.val_types_by_name.entry(String::from(name)) {
             Occupied(_) => { panic!("'{}' value type is already registered.", name); }
-            Vacant(entry) => entry.insert(descr)
-        }.borrow_mut() as *const ValTypeDescr;
-        ValType { descr: unsafe { &*ptr } }
+            Vacant(entry) => entry.insert(val_type)
+        };
+        val_type
     }
-    pub fn reg_dep_type(&mut self, name: String, base: Option<&'fw DepType>) -> &'fw DepType {
-        let type_ = Box::new(DepType { base: base, name: name });
-        let name = unsafe { &*(&type_.name[..] as *const str) };
-        let ptr = match self.dep_types.entry(name) {
+    pub fn reg_dep_type(&mut self, name: String, base: Option<DepType>) -> DepType {
+        self.dep_types.push(DepTypeDesc { base: base, name: name, props: Vec::new(), props_by_name: HashMap::new() });
+        let dep_type = DepType { index: self.dep_types.len() - 1 };
+        let name = &self.dep_types[dep_type.index].name;
+        match self.dep_types_by_name.entry(name.clone()) {
             Occupied(_) => { panic!("'{}' dependency type is already registered.", name); }
-            Vacant(entry) => entry.insert(type_)
-        }.borrow_mut() as *const DepType;
-        unsafe { &*ptr }
+            Vacant(entry) => entry.insert(dep_type)
+        };
+        dep_type
+    }
+    pub fn reg_prop(&mut self, owner: DepType, name: String, val_type: Type, attached: Option<DepType>) -> DepProp {
+        let owner_desc = &mut self.dep_types[owner.index];
+        owner_desc.props.push(DepPropDesc { name: name, val_type: val_type, attached: attached });
+        let dep_prop = DepProp { owner: owner, index: owner_desc.props.len() - 1 };
+        let name = &owner_desc.props[dep_prop.index].name;
+        match owner_desc.props_by_name.entry(name.clone()) {
+            Occupied(_) => { panic!("'{}' dependency property is already registered for '{}' type.", name, &owner_desc.name); }
+            Vacant(entry) => entry.insert(dep_prop)
+        };
+        dep_prop
     }
 }
 
@@ -100,16 +159,17 @@ mod tests {
     use draw::{ draw_border, draw_texel, Border, Graph, draw_text, fill_rect };
 
     use std::rc::Rc;
-    use ValTypeDescr;
+    use ValTypeDesc;
     use ValType;
     use Val;
     use Fw;
+    use Type;
 
     #[derive(Debug)]
-    struct StrValTypeDescr { }
-    impl ValTypeDescr for StrValTypeDescr {
+    struct StrValTypeDesc { }
+    impl ValTypeDesc for StrValTypeDesc {
         fn name(&self) -> &str { &"str" }
-        fn parse<'fw>(&self, type_: ValType<'fw>, s: &str) -> Option<Rc<Val<'fw>>> {
+        fn parse(&self, type_: ValType, s: &str) -> Option<Rc<Val>> {
             Some(type_.box_(String::from(s)))
         }
         fn to_string(&self, val: &Val) -> String { val.unbox::<String>().clone() }
@@ -118,10 +178,19 @@ mod tests {
     #[test]
     fn reg_val_type_test() {
         let mut fw = Fw::new();
-        let str_type = fw.reg_val_type(Box::new(StrValTypeDescr { }));
-        assert_eq!("123", str_type.parse(&"123").unwrap().unbox::<String>());
-        assert_eq!("123", str_type.box_(String::from("123")).to_string());
-        assert_eq!("str", str_type.name());
+        let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
+        assert_eq!("123", fw.parse(str_type, &"123").unwrap().unbox::<String>());
+        assert_eq!("123", fw.to_string(&str_type.box_(String::from("123"))));
+        assert_eq!("str", fw.val_type_name(str_type));
+    }
+
+    #[test]
+    fn reg_dep_type_prop_test() {
+        let mut fw = Fw::new();
+        let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
+        let obj_type = fw.reg_dep_type(String::from("obj"), None);
+        let name_prop = fw.reg_prop(obj_type, String::from("name"), Type::Val(str_type), None);
+        assert_eq!("name", fw.dep_prop_name(name_prop));
     }
 
     #[test]
