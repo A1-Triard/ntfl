@@ -137,7 +137,7 @@ impl Fw {
         };
         dep_type
     }
-    pub fn reg_prop(&mut self, owner: DepType, name: String, val_type: Type, attached: Option<DepType>) -> DepProp {
+    pub fn reg_dep_prop(&mut self, owner: DepType, name: String, val_type: Type, attached: Option<DepType>) -> DepProp {
         let owner_desc = &mut self.dep_types[owner.index];
         owner_desc.props.push(DepPropDesc { name: name, val_type: val_type, attached: attached });
         let dep_prop = DepProp { owner: owner, index: owner_desc.props.len() - 1 };
@@ -189,7 +189,7 @@ mod tests {
         let mut fw = Fw::new();
         let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
         let obj_type = fw.reg_dep_type(String::from("obj"), None);
-        let name_prop = fw.reg_prop(obj_type, String::from("name"), Type::Val(str_type), None);
+        let name_prop = fw.reg_dep_prop(obj_type, String::from("name"), Type::Val(str_type), None);
         assert_eq!("name", fw.dep_prop_name(name_prop));
     }
 
