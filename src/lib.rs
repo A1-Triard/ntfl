@@ -20,7 +20,7 @@ pub trait ValTypeDesc {
     fn to_string(&self, val: &Val) -> String;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ValType {
     index: usize
 }
@@ -29,6 +29,7 @@ impl ValType {
     pub fn box_<T: 'static>(&self, val: T) -> Rc<Val> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
 }
 
+#[derive(Debug)]
 pub struct Val {
     type_: ValType,
     unbox: Box<Any>,
@@ -39,7 +40,6 @@ impl Val {
     pub fn unbox<T: 'static>(&self) -> &T { self.unbox.downcast_ref().unwrap() }
 }
 
-#[derive(Debug)]
 struct DepTypeDesc {
     base: Option<DepType>,
     name: String,
@@ -47,25 +47,25 @@ struct DepTypeDesc {
     props_by_name: HashMap<String, DepProp>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct DepType {
     index: usize
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Val(ValType),
     Dep(DepType),
 }
 
-#[derive(Debug)]
 struct DepPropDesc {
     name: String,
     val_type: Type,
     attached: Option<DepType>,
+    def_val: Obj,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct DepProp {
     owner: DepType,
     index: usize,
@@ -80,6 +80,22 @@ pub struct Fw {
     val_types_by_name: HashMap<String, ValType>,
     dep_types: Vec<DepTypeDesc>,
     dep_types_by_name: HashMap<String, DepType>,
+}
+
+#[derive(Debug)]
+pub struct DepObj {
+    type_: DepType,
+    props: HashMap<DepProp, Obj>,
+}
+
+impl DepObj {
+    pub fn type_(&self) -> DepType { self.type_ }
+}
+
+#[derive(Debug, Clone)]
+pub enum Obj {
+    Val(Rc<Val>),
+    Dep(Rc<DepObj>),
 }
 
 impl Fw {
@@ -110,6 +126,9 @@ impl Fw {
     pub fn dep_prop_name(&self, dep_prop: DepProp) -> &str {
         &self.dep_types[dep_prop.owner.index].props[dep_prop.index].name[..]
     }
+    pub fn dep_prop_def_val(&self, dep_prop: DepProp) -> &Obj {
+        &self.dep_types[dep_prop.owner.index].props[dep_prop.index].def_val
+    }
     pub fn dep_prop_val_type(&self, dep_prop: DepProp) -> &Type {
         &self.dep_types[dep_prop.owner.index].props[dep_prop.index].val_type
     }
@@ -136,9 +155,9 @@ impl Fw {
         };
         dep_type
     }
-    pub fn reg_dep_prop(&mut self, owner: DepType, name: String, val_type: Type, attached: Option<DepType>) -> DepProp {
+    pub fn reg_dep_prop(&mut self, owner: DepType, name: String, val_type: Type, def_val: Obj, attached: Option<DepType>) -> DepProp {
         let owner_desc = &mut self.dep_types[owner.index];
-        owner_desc.props.push(DepPropDesc { name: name, val_type: val_type, attached: attached });
+        owner_desc.props.push(DepPropDesc { name: name, val_type: val_type, attached: attached, def_val: def_val });
         let dep_prop = DepProp { owner: owner, index: owner_desc.props.len() - 1 };
         let name = &owner_desc.props[dep_prop.index].name;
         match owner_desc.props_by_name.entry(name.clone()) {
@@ -146,6 +165,11 @@ impl Fw {
             Vacant(entry) => entry.insert(dep_prop)
         };
         dep_prop
+    }
+    pub fn get<'a>(&'a self, dep_obj: &'a DepObj, dep_prop: DepProp) -> &'a Obj {
+        dep_obj.props.get(&dep_prop).unwrap_or_else(|| {
+            &self.dep_types[dep_prop.owner.index].props[dep_prop.index].def_val
+        })
     }
 }
 
@@ -163,6 +187,7 @@ mod tests {
     use Val;
     use Fw;
     use Type;
+    use Obj;
 
     struct StrValTypeDesc { }
     impl ValTypeDesc for StrValTypeDesc {
@@ -187,7 +212,7 @@ mod tests {
         let mut fw = Fw::new();
         let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
         let obj_type = fw.reg_dep_type(String::from("obj"), None);
-        let name_prop = fw.reg_dep_prop(obj_type, String::from("name"), Type::Val(str_type), None);
+        let name_prop = fw.reg_dep_prop(obj_type, String::from("name"), Type::Val(str_type), Obj::Val(str_type.box_(String::from(""))), None);
         assert_eq!("name", fw.dep_prop_name(name_prop));
     }
 

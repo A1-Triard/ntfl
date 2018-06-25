@@ -2,7 +2,7 @@
 
 use either::Either;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(i8)]
 pub enum Color {
     Black = 0,

@@ -3,7 +3,7 @@ use std::cmp::max;
 use scr::{ Color, Attr, Texel };
 use window::{ Rect, Window };
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Graph {
     ULCorner = 'l' as u32 as u8,
