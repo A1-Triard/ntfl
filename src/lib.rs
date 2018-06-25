@@ -10,8 +10,10 @@ pub mod window;
 pub mod draw;
 
 use std::any::Any;
+use std::cell::{ RefCell, Ref };
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{ Occupied, Vacant };
+use std::ops::Deref;
 use std::rc::Rc;
 
 pub trait ValTypeDesc {
@@ -27,6 +29,12 @@ pub struct ValType {
 
 impl ValType {
     pub fn box_<T: 'static>(&self, val: T) -> Rc<Val> { Rc::new(Val { type_: *self, unbox: Box::new(val) }) }
+    pub fn name(self, fw: &Fw) -> &str {
+        fw.val_types[self.index].name()
+    }
+    pub fn parse(self, fw: &Fw, s: &str) -> Option<Rc<Val>> {
+        fw.val_types[self.index].parse(self, s)
+    }
 }
 
 #[derive(Debug)]
@@ -38,6 +46,9 @@ pub struct Val {
 impl Val {
     pub fn type_(&self) -> ValType { self.type_ }
     pub fn unbox<T: 'static>(&self) -> &T { self.unbox.downcast_ref().unwrap() }
+    pub fn to_string(&self, fw: &Fw) -> String {
+        fw.val_types[self.type_.index].to_string(self)
+    }
 }
 
 struct DepTypeDesc {
@@ -50,6 +61,18 @@ struct DepTypeDesc {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct DepType {
     index: usize
+}
+
+impl DepType {
+    pub fn name(self, fw: &Fw) -> &str {
+        &fw.dep_types[self.index].name
+    }
+    pub fn base(self, fw: &Fw) -> Option<DepType> {
+        fw.dep_types[self.index].base
+    }
+    pub fn create(self) -> Rc<DepObj> {
+        Rc::new(DepObj { type_: self, props: RefCell::new(HashMap::new()) })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -72,7 +95,19 @@ pub struct DepProp {
 }
 
 impl DepProp {
-    pub fn owner(&self) -> DepType { self.owner }
+    pub fn owner(self) -> DepType { self.owner }
+    pub fn name(self, fw: &Fw) -> &str {
+        &fw.dep_types[self.owner.index].props[self.index].name[..]
+    }
+    pub fn def_val(self, fw: &Fw) -> &Obj {
+        &fw.dep_types[self.owner.index].props[self.index].def_val
+    }
+    pub fn val_type(self, fw: &Fw) -> &Type {
+        &fw.dep_types[self.owner.index].props[self.index].val_type
+    }
+    pub fn attached(self, fw: &Fw) -> Option<DepType> {
+        fw.dep_types[self.owner.index].props[self.index].attached
+    }
 }
 
 pub struct Fw {
@@ -85,17 +120,51 @@ pub struct Fw {
 #[derive(Debug)]
 pub struct DepObj {
     type_: DepType,
-    props: HashMap<DepProp, Obj>,
+    props: RefCell<HashMap<DepProp, Obj>>,
+}
+
+pub struct ObjRef<'a> {
+    props: Ref<'a, HashMap<DepProp, Obj>>,
+    fw: &'a Fw,
+    dep_prop: DepProp,
+}
+
+impl<'a> Deref for ObjRef<'a> {
+    type Target = Obj;
+
+    fn deref(&self) -> &Obj {
+        self.props.get(&self.dep_prop).unwrap_or_else(|| {
+            &self.fw.dep_types[self.dep_prop.owner.index].props[self.dep_prop.index].def_val
+        })
+    }
 }
 
 impl DepObj {
     pub fn type_(&self) -> DepType { self.type_ }
+    pub fn get<'a>(&'a self, fw: &'a Fw, dep_prop: DepProp) -> ObjRef<'a> {
+        ObjRef { props: self.props.borrow(), fw: fw, dep_prop: dep_prop }
+    }
+    pub fn set(&self, dep_prop: DepProp, val: Obj) {
+        self.props.borrow_mut().insert(dep_prop, val);
+    }
+    pub fn reset(&self, dep_prop: DepProp) {
+        self.props.borrow_mut().remove(&dep_prop);
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Obj {
     Val(Rc<Val>),
     Dep(Rc<DepObj>),
+}
+
+impl Obj {
+    pub fn unbox<T: 'static>(&self) -> &T {
+        match self {
+            Obj::Val(ref v) => v.unbox(),
+            Obj::Dep(_) => { panic!("Cannot unbox a dependency object."); }
+        }
+    }
 }
 
 impl Fw {
@@ -105,42 +174,18 @@ impl Fw {
     pub fn val_type(&self, name: &str) -> Option<ValType> {
         self.val_types_by_name.get(name).map(|x| { *x })
     }
-    pub fn val_type_name(&self, val_type: ValType) -> &str {
-        self.val_types[val_type.index].name()
-    }
-    pub fn parse(&self, val_type: ValType, s: &str) -> Option<Rc<Val>> {
-        self.val_types[val_type.index].parse(val_type, s)
-    }
-    pub fn to_string(&self, val: &Val) -> String {
-        self.val_types[val.type_.index].to_string(val)
-    }
     pub fn dep_type(&self, name: &str) -> Option<DepType> {
         self.dep_types_by_name.get(name).map(|x| { *x })
     }
-    pub fn dep_type_name(&self, dep_type: DepType) -> &str {
-        &self.dep_types[dep_type.index].name
-    }
-    pub fn base(&self, dep_type: DepType) -> Option<DepType> {
-        self.dep_types[dep_type.index].base
-    }
-    pub fn dep_prop_name(&self, dep_prop: DepProp) -> &str {
-        &self.dep_types[dep_prop.owner.index].props[dep_prop.index].name[..]
-    }
-    pub fn dep_prop_def_val(&self, dep_prop: DepProp) -> &Obj {
-        &self.dep_types[dep_prop.owner.index].props[dep_prop.index].def_val
-    }
-    pub fn dep_prop_val_type(&self, dep_prop: DepProp) -> &Type {
-        &self.dep_types[dep_prop.owner.index].props[dep_prop.index].val_type
-    }
-    pub fn dep_prop_attached(&self, dep_prop: DepProp) -> Option<DepType> {
-        self.dep_types[dep_prop.owner.index].props[dep_prop.index].attached
+    pub fn dep_prop(&self, dep_type: DepType, name: &str) -> Option<DepProp> {
+        self.dep_types[dep_type.index].props_by_name.get(name).map(|x| { *x })
     }
     pub fn reg_val_type(&mut self, desc: Box<ValTypeDesc>) -> ValType {
         self.val_types.push(desc);
         let val_type = ValType { index: self.val_types.len() - 1 };
         let name = self.val_types[val_type.index].name();
         match self.val_types_by_name.entry(String::from(name)) {
-            Occupied(_) => { panic!("'{}' value type is already registered.", name); }
+            Occupied(_) => { panic!("The '{}' value type is already registered.", name); }
             Vacant(entry) => entry.insert(val_type)
         };
         val_type
@@ -150,7 +195,7 @@ impl Fw {
         let dep_type = DepType { index: self.dep_types.len() - 1 };
         let name = &self.dep_types[dep_type.index].name;
         match self.dep_types_by_name.entry(name.clone()) {
-            Occupied(_) => { panic!("'{}' dependency type is already registered.", name); }
+            Occupied(_) => { panic!("The '{}' dependency type is already registered.", name); }
             Vacant(entry) => entry.insert(dep_type)
         };
         dep_type
@@ -161,15 +206,10 @@ impl Fw {
         let dep_prop = DepProp { owner: owner, index: owner_desc.props.len() - 1 };
         let name = &owner_desc.props[dep_prop.index].name;
         match owner_desc.props_by_name.entry(name.clone()) {
-            Occupied(_) => { panic!("'{}' dependency property is already registered for '{}' type.", name, &owner_desc.name); }
+            Occupied(_) => { panic!("The '{}' dependency property is already registered for '{}' type.", name, &owner_desc.name); }
             Vacant(entry) => entry.insert(dep_prop)
         };
         dep_prop
-    }
-    pub fn get<'a>(&'a self, dep_obj: &'a DepObj, dep_prop: DepProp) -> &'a Obj {
-        dep_obj.props.get(&dep_prop).unwrap_or_else(|| {
-            &self.dep_types[dep_prop.owner.index].props[dep_prop.index].def_val
-        })
     }
 }
 
@@ -202,18 +242,26 @@ mod tests {
     fn reg_val_type_test() {
         let mut fw = Fw::new();
         let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
-        assert_eq!("123", fw.parse(str_type, &"123").unwrap().unbox::<String>());
-        assert_eq!("123", fw.to_string(&str_type.box_(String::from("123"))));
-        assert_eq!("str", fw.val_type_name(str_type));
+        assert_eq!("123", str_type.parse(&fw, &"123").unwrap().unbox::<String>());
+        assert_eq!("123", str_type.box_(String::from("123")).to_string(&fw));
+        assert_eq!("str", str_type.name(&fw));
     }
 
     #[test]
-    fn reg_dep_type_prop_test() {
+    fn reg_dep_type_prop_get_set_test() {
         let mut fw = Fw::new();
         let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
         let obj_type = fw.reg_dep_type(String::from("obj"), None);
-        let name_prop = fw.reg_dep_prop(obj_type, String::from("name"), Type::Val(str_type), Obj::Val(str_type.box_(String::from(""))), None);
-        assert_eq!("name", fw.dep_prop_name(name_prop));
+        let name_prop = fw.reg_dep_prop(obj_type, String::from("name"), Type::Val(str_type), Obj::Val(str_type.box_(String::from("x"))), None);
+        assert_eq!("name", name_prop.name(&fw));
+        let obj = obj_type.create();
+        assert_eq!("x", obj.get(&fw, name_prop).unbox::<String>());
+        obj.set(name_prop, Obj::Val(str_type.box_(String::from("local value"))));
+        assert_eq!("local value", obj.get(&fw, name_prop).unbox::<String>());
+        obj.reset(name_prop);
+        assert_eq!("x", obj.get(&fw, name_prop).unbox::<String>());
+        obj.reset(name_prop);
+        assert_eq!("x", obj.get(&fw, name_prop).unbox::<String>());
     }
 
     #[test]
