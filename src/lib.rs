@@ -302,6 +302,14 @@ impl Fw {
         };
         dep_prop
     }
+    pub fn override_def_val(&mut self, dep_type: DepType, dep_prop: DepProp, def_val: Obj) {
+        assert_dep_prop_target(dep_prop, dep_type, self);
+        assert_dep_prop_val(dep_prop, def_val.type_(), self);
+        match self.dep_types.get_mut(dep_type.index).unwrap().def_val.entry(dep_prop) {
+            Occupied(_) => { panic!("Default value is registered already."); }
+            Vacant(entry) => entry.insert(def_val)
+        };
+    }
 }
 
 #[cfg(test)]
