@@ -32,7 +32,7 @@ impl ValType {
     pub fn name(self, fw: &Fw) -> &str {
         fw.val_types[self.index].name()
     }
-    pub fn parse(self, fw: &Fw, s: &str) -> Option<Rc<Val>> {
+    pub fn parse(self, s: &str, fw: &Fw) -> Option<Rc<Val>> {
         fw.val_types[self.index].parse(self, s)
     }
 }
@@ -65,13 +65,13 @@ pub struct DepType {
 }
 
 fn assert_dep_prop_target(dep_prop: DepProp, dep_type: DepType, fw: &Fw) {
-    if !dep_type.is(fw, dep_prop.target(fw)) {
+    if !dep_type.is(dep_prop.target(fw), fw) {
         panic!("Dependency property target type mismatch.");
     }
 }
 
 fn assert_dep_prop_val(dep_prop: DepProp, val_type: Type, fw: &Fw) {
-    if !val_type.is(fw, dep_prop.val_type(fw)) {
+    if !val_type.is(dep_prop.val_type(fw), fw) {
         panic!("Dependency property value type mismatch.");
     }
 }
@@ -83,7 +83,7 @@ impl DepType {
     pub fn base(self, fw: &Fw) -> Option<DepType> {
         fw.dep_types[self.index].base
     }
-    pub fn def_val(self, fw: &Fw, dep_prop: DepProp) -> &Obj {
+    pub fn def_val(self, dep_prop: DepProp, fw: &Fw) -> &Obj {
         assert_dep_prop_target(dep_prop, self, fw);
         fn self_def_val(dep_type: DepType, fw: &Fw, dep_prop: DepProp) -> Option<&Obj> {
             fw.dep_types[dep_type.index].def_val.get(&dep_prop)
@@ -99,7 +99,7 @@ impl DepType {
     pub fn create(self) -> Rc<DepObj> {
         Rc::new(DepObj { type_: self, props: RefCell::new(HashMap::new()) })
     }
-    pub fn is(self, fw: &Fw, dep_type: DepType) -> bool {
+    pub fn is(self, dep_type: DepType, fw: &Fw) -> bool {
         let mut base = self;
         loop {
             if base == dep_type { return true; }
@@ -115,7 +115,7 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn is(&self, fw: &Fw, type_: &Type) -> bool {
+    pub fn is(&self, type_: &Type, fw: &Fw) -> bool {
         match self {
             &Type::Val(v) => {
                 match type_ {
@@ -126,7 +126,7 @@ impl Type {
             &Type::Dep(d) => {
                 match type_ {
                     &Type::Val(_) => false,
-                    &Type::Dep(o_d) => d.is(fw, o_d)
+                    &Type::Dep(o_d) => d.is(o_d, fw)
                 }
             }
         }
@@ -186,7 +186,7 @@ impl<'a> Deref for GetRef<'a> {
 
     fn deref(&self) -> &Obj {
         self.props.get(&self.dep_prop).unwrap_or_else(|| {
-            self.dep_type.def_val(self.fw, self.dep_prop)
+            self.dep_type.def_val(self.dep_prop, self.fw)
         })
     }
 }
@@ -204,25 +204,25 @@ impl<'a> GetNonDefRef<'a> {
 
 impl DepObj {
     pub fn type_(&self) -> DepType { self.type_ }
-    pub fn get_non_def<'a>(&'a self, fw: &'a Fw, dep_prop: DepProp) -> GetNonDefRef<'a> {
+    pub fn get_non_def<'a>(&'a self, dep_prop: DepProp, fw: &Fw) -> GetNonDefRef<'a> {
         assert_dep_prop_target(dep_prop, self.type_, fw);
         GetNonDefRef { props: self.props.borrow(), dep_prop: dep_prop }
     }
-    pub fn get<'a>(&'a self, fw: &'a Fw, dep_prop: DepProp) -> GetRef<'a> {
+    pub fn get<'a>(&'a self, dep_prop: DepProp, fw: &'a Fw) -> GetRef<'a> {
         assert_dep_prop_target(dep_prop, self.type_, fw);
         GetRef { props: self.props.borrow(), fw: fw, dep_prop: dep_prop, dep_type: self.type_ }
     }
-    pub fn set(&self, fw: &Fw, dep_prop: DepProp, val: Obj) {
+    pub fn set(&self, dep_prop: DepProp, val: Obj, fw: &Fw) {
         assert_dep_prop_target(dep_prop, self.type_, fw);
         assert_dep_prop_val(dep_prop, val.type_(), fw);
         self.props.borrow_mut().insert(dep_prop, val);
     }
-    pub fn reset(&self, fw: &Fw, dep_prop: DepProp) {
+    pub fn reset(&self, dep_prop: DepProp, fw: &Fw) {
         assert_dep_prop_target(dep_prop, self.type_, fw);
         self.props.borrow_mut().remove(&dep_prop);
     }
-    pub fn is(&self, fw: &Fw, dep_type: DepType) -> bool {
-        self.type_.is(fw, dep_type)
+    pub fn is(&self, dep_type: DepType, fw: &Fw) -> bool {
+        self.type_.is(dep_type, fw)
     }
 }
 
@@ -245,8 +245,8 @@ impl Obj {
             &Obj::Dep(ref d) => Type::Dep(d.type_())
         }
     }
-    pub fn is(&self, fw: &Fw, type_: &Type) -> bool {
-        self.type_().is(fw, type_)
+    pub fn is(&self, type_: &Type, fw: &Fw) -> bool {
+        self.type_().is(type_, fw)
     }
 }
 
@@ -284,7 +284,7 @@ impl Fw {
         dep_type
     }
     pub fn reg_dep_prop(&mut self, owner: DepType, name: String, val_type: Type, def_val: Obj, attached: Option<DepType>) -> DepProp {
-        if !def_val.is(self, &val_type) { panic!("Default value type mismatch."); }
+        if !def_val.is(&val_type, self) { panic!("Default value type mismatch."); }
         let dep_prop = {
             let owner_desc = &mut self.dep_types[owner.index];
             owner_desc.props.push(DepPropDesc { name: name, val_type: val_type, attached: attached });
@@ -341,7 +341,7 @@ mod tests {
     fn reg_val_type_test() {
         let mut fw = Fw::new();
         let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
-        assert_eq!("123", str_type.parse(&fw, &"123").unwrap().unbox::<String>());
+        assert_eq!("123", str_type.parse(&"123", &fw).unwrap().unbox::<String>());
         assert_eq!("123", str_type.box_(String::from("123")).to_string(&fw));
         assert_eq!("str", str_type.name(&fw));
     }
@@ -354,13 +354,13 @@ mod tests {
         let name_prop = fw.reg_dep_prop(obj_type, String::from("name"), Type::Val(str_type), Obj::Val(str_type.box_(String::from("x"))), None);
         assert_eq!("name", name_prop.name(&fw));
         let obj = obj_type.create();
-        assert_eq!("x", obj.get(&fw, name_prop).unbox::<String>());
-        obj.set(&fw, name_prop, Obj::Val(str_type.box_(String::from("local value"))));
-        assert_eq!("local value", obj.get(&fw, name_prop).unbox::<String>());
-        obj.reset(&fw, name_prop);
-        assert_eq!("x", obj.get(&fw, name_prop).unbox::<String>());
-        obj.reset(&fw, name_prop);
-        assert_eq!("x", obj.get(&fw, name_prop).unbox::<String>());
+        assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
+        obj.set(name_prop, Obj::Val(str_type.box_(String::from("local value"))), &fw);
+        assert_eq!("local value", obj.get(name_prop, &fw).unbox::<String>());
+        obj.reset(name_prop, &fw);
+        assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
+        obj.reset(name_prop, &fw);
+        assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
     }
 
     #[test]
@@ -368,10 +368,10 @@ mod tests {
         let mut fw = Fw::new();
         let base_type = fw.reg_dep_type(String::from("base"), None);
         let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type));
-        assert!(obj_type.is(&fw, base_type));
-        assert!(obj_type.is(&fw, obj_type));
-        assert!(base_type.is(&fw, base_type));
-        assert!(!base_type.is(&fw, obj_type));
+        assert!(obj_type.is(base_type, &fw));
+        assert!(obj_type.is(obj_type, &fw));
+        assert!(base_type.is(base_type, &fw));
+        assert!(!base_type.is(obj_type, &fw));
     }
 
     #[test]
