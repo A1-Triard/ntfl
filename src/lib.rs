@@ -12,10 +12,9 @@ pub mod draw;
 use std::any::Any;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{ Occupied, Vacant };
-use std::fmt::Debug;
 use std::rc::Rc;
 
-pub trait ValTypeDesc : Debug {
+pub trait ValTypeDesc {
     fn name(&self) -> &str;
     fn parse<'a>(&self, type_: ValType, s: &str) -> Option<Rc<Val>>;
     fn to_string(&self, val: &Val) -> String;
@@ -165,7 +164,6 @@ mod tests {
     use Fw;
     use Type;
 
-    #[derive(Debug)]
     struct StrValTypeDesc { }
     impl ValTypeDesc for StrValTypeDesc {
         fn name(&self) -> &str { &"str" }
