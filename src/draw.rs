@@ -1,9 +1,10 @@
 use std::char::from_u32;
-use std::cmp::max;
+use std::cmp::{ Ordering, max };
 use scr::{ Color, Attr, Texel };
 use window::{ Rect, Window };
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Derivative)]
+#[derivative(Debug, Copy, Clone, PartialEq="feature_allow_slow_enum", Eq, Hash)]
 #[repr(u8)]
 pub enum Graph {
     ULCorner = 'l' as u32 as u8,
@@ -38,6 +39,13 @@ pub enum Graph {
     Pi = '{' as u32 as u8,
     NotEqual = '|' as u32 as u8,
     Sterling = '}' as u32 as u8,
+}
+
+impl Ord for Graph {
+    fn cmp(&self, other: &Graph) -> Ordering { (*self as u8).cmp(&(*other as u8)) }
+}
+impl PartialOrd for Graph {
+    fn partial_cmp(&self, other: &Graph) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
 pub trait ToTexel {

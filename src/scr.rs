@@ -1,8 +1,10 @@
 #![deny(warnings)]
 
+use std::cmp::Ordering;
 use either::Either;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Derivative)]
+#[derivative(Debug, Copy, Clone, PartialEq="feature_allow_slow_enum", Eq, Hash)]
 #[repr(i8)]
 pub enum Color {
     Black = 0,
@@ -13,6 +15,13 @@ pub enum Color {
     Magenta = 5,
     Cyan = 6,
     White = 7,
+}
+
+impl Ord for Color {
+    fn cmp(&self, other: &Color) -> Ordering { (*self as i8).cmp(&(*other as i8)) }
+}
+impl PartialOrd for Color {
+    fn partial_cmp(&self, other: &Color) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
 bitflags! {
@@ -36,7 +45,8 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Derivative)]
+#[derivative(Debug, Clone, PartialEq, Eq)]
 pub struct Texel {
     pub ch: char,
     pub attr: Attr,

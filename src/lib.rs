@@ -1,5 +1,7 @@
 #![deny(warnings)]
 #[macro_use]
+extern crate derivative;
+#[macro_use]
 extern crate bitflags;
 extern crate either;
 extern crate libc;
@@ -11,6 +13,7 @@ pub mod draw;
 
 use std::any::Any;
 use std::cell::{ RefCell, Ref };
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{ Occupied, Vacant };
 use std::ops::Deref;
@@ -22,9 +25,17 @@ pub trait ValTypeDesc {
     fn to_string(&self, val: &Val) -> String;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Derivative)]
+#[derivative(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ValType {
     index: usize
+}
+
+impl Ord for ValType {
+    fn cmp(&self, other: &ValType) -> Ordering { self.index.cmp(&other.index) }
+}
+impl PartialOrd for ValType {
+    fn partial_cmp(&self, other: &ValType) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
 impl ValType {
@@ -37,7 +48,8 @@ impl ValType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct Val {
     type_: ValType,
     unbox: Box<Any>,
@@ -59,9 +71,17 @@ struct DepTypeDesc {
     def_val: HashMap<DepProp, Obj>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Derivative)]
+#[derivative(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct DepType {
     index: usize
+}
+
+impl Ord for DepType {
+    fn cmp(&self, other: &DepType) -> Ordering { self.index.cmp(&other.index) }
+}
+impl PartialOrd for DepType {
+    fn partial_cmp(&self, other: &DepType) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
 fn assert_dep_prop_target(dep_prop: DepProp, dep_type: DepType, fw: &Fw) {
@@ -108,10 +128,33 @@ impl DepType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Derivative)]
+#[derivative(Debug, Copy, Clone, PartialEq = "feature_allow_slow_enum", Eq, Hash)]
 pub enum Type {
     Val(ValType),
     Dep(DepType),
+}
+
+impl Ord for Type {
+    fn cmp(&self, other: &Type) -> Ordering {
+        match self {
+            &Type::Val(ref v) => {
+                match other {
+                    &Type::Val(ref o_v) => v.cmp(o_v),
+                    &Type::Dep(_) => Ordering::Less,
+                }
+            },
+            &Type::Dep(ref d) => {
+                match other {
+                    &Type::Val(_) => Ordering::Greater,
+                    &Type::Dep(ref o_d) => d.cmp(o_d)
+                }
+            }
+        }
+    }
+}
+impl PartialOrd for Type {
+    fn partial_cmp(&self, other: &Type) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
 impl Type {
@@ -139,10 +182,22 @@ struct DepPropDesc {
     attached: Option<DepType>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Derivative)]
+#[derivative(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct DepProp {
     owner: DepType,
     index: usize,
+}
+
+impl Ord for DepProp {
+    fn cmp(&self, other: &DepProp) -> Ordering {
+        let c = self.owner.cmp(&other.owner);
+        if c != Ordering::Equal { return c; }
+        self.index.cmp(&other.index)
+    }
+}
+impl PartialOrd for DepProp {
+    fn partial_cmp(&self, other: &DepProp) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
 impl DepProp {
@@ -168,7 +223,8 @@ pub struct Fw {
     dep_types_by_name: HashMap<String, DepType>,
 }
 
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct DepObj {
     type_: DepType,
     props: RefCell<HashMap<DepProp, Obj>>,
@@ -226,7 +282,8 @@ impl DepObj {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Derivative)]
+#[derivative(Debug, Clone)]
 pub enum Obj {
     Val(Rc<Val>),
     Dep(Rc<DepObj>),

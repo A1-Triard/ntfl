@@ -3,12 +3,13 @@
 use std::cell::{ Ref, RefCell };
 use std::cmp::{ min, max };
 use std::mem::replace;
-use std::ops::{ Deref, DerefMut };
+use std::ops::DerefMut;
 use std::rc::Rc;
 
 use scr::{ Attr, Color, Scr, Texel };
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Derivative)]
+#[derivative(Debug, Clone, PartialEq, Eq)]
 struct RectValue {
     top: isize,
     left: isize,
@@ -21,7 +22,8 @@ impl RectValue {
     pub fn right(&self) -> isize { self.left + self.width }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Derivative)]
+#[derivative(Debug, Clone, PartialEq, Eq)]
 pub struct Rect {
     val: Option<RectValue>,
 }
@@ -242,24 +244,12 @@ impl WindowsHost {
     }
 }
 
-pub struct WindowBoundsRef<'a> {
-    data: Ref<'a, WindowData>
-}
-
-impl<'a> Deref for WindowBoundsRef<'a> {
-    type Target = Rect;
-
-    fn deref(&self) -> &Rect {
-        &self.data.bounds
-    }
-}
-
 impl Window {
     pub fn out(&mut self, y: isize, x: isize, c: Texel) {
         self.data.borrow_mut().out(y, x, c);
     }
-    pub fn bounds(&self) -> WindowBoundsRef {
-        WindowBoundsRef { data: self.data.borrow() }
+    pub fn bounds(&self) -> Ref<Rect> {
+        Ref::map(self.data.borrow(), |data| &data.bounds)
     }
     pub fn area(&self) -> Rect {
         let (height, width) = self.data.borrow().bounds.size();
