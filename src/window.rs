@@ -8,8 +8,7 @@ use std::rc::Rc;
 
 use scr::{ Attr, Color, Scr, Texel };
 
-#[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RectValue {
     top: isize,
     left: isize,
@@ -22,8 +21,7 @@ impl RectValue {
     pub fn right(&self) -> isize { self.left + self.width }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rect {
     val: Option<RectValue>,
 }
