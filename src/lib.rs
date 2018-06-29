@@ -2,7 +2,6 @@
 #[macro_use]
 extern crate bitflags;
 extern crate either;
-#[cfg(test)]
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
@@ -11,7 +10,56 @@ pub mod scr;
 pub mod ncurses;
 pub mod window;
 pub mod draw;
+#[macro_use]
 pub mod fw;
+pub mod inst;
+
+use std::sync::Arc;
+use fw::{ ValType, ValTypeDesc, Fw, Val };
+
+pub struct Ntfl<I> {
+    str_type: ValType<I>,
+    bool_type: ValType<I>,
+}
+
+struct StrTypeDesc { }
+impl<I> ValTypeDesc<I> for StrTypeDesc {
+    fn name(&self) -> &str { &"Str" }
+    fn parse(&self, type_: ValType<I>, s: &str) -> Option<Arc<Val<I>>> {
+        Some(type_.box_(String::from(s)))
+    }
+    fn to_string(&self, val: &Val<I>) -> String {
+        val.unbox::<String>().clone()
+    }
+}
+
+struct BoolTypeDesc { }
+impl<I> ValTypeDesc<I> for BoolTypeDesc {
+    fn name(&self) -> &str { &"Bool" }
+    fn parse(&self, type_: ValType<I>, s: &str) -> Option<Arc<Val<I>>> {
+        let maybe_val = match s {
+            "True" => Some(true),
+            "False" => Some(false),
+            _ => None
+        };
+        maybe_val.map(|val| { type_.box_(val) })
+    }
+    fn to_string(&self, val: &Val<I>) -> String {
+        let val = *val.unbox::<bool>();
+        String::from(if val { "True" } else { "False" })
+    }
+}
+
+impl<I> Ntfl<I> {
+    pub fn new(fw: &mut Fw<I>) -> Ntfl<I> {
+        Ntfl {
+            str_type: fw.reg_val_type(Box::new(StrTypeDesc { })),
+            bool_type: fw.reg_val_type(Box::new(BoolTypeDesc { })),
+        }
+    }
+    pub fn str_type(&self) -> &ValType<I> { &self.str_type }
+    pub fn bool_type(&self) -> &ValType<I> { &self.bool_type }
+}
 
 #[cfg(test)]
 mod tests {

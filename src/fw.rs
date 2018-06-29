@@ -12,7 +12,7 @@ use std::sync::{ Arc, Mutex, MutexGuard };
 
 pub trait ValTypeDesc<I> : Send {
     fn name(&self) -> &str;
-    fn parse<'a>(&self, type_: ValType<I>, s: &str) -> Option<Arc<Val<I>>>;
+    fn parse(&self, type_: ValType<I>, s: &str) -> Option<Arc<Val<I>>>;
     fn to_string(&self, val: &Val<I>) -> String;
 }
 
@@ -378,10 +378,12 @@ impl<I> Fw<I> {
 #[macro_export]
 macro_rules! fw_instance {
     ($guard_name:ident) => {
+        use std;
+        use fw;
         pub struct $guard_name(());
-        pub type Fw = ntfl::Fw<$guard_name>;
+        pub type Fw = fw::Fw<$guard_name>;
         lazy_static! {
-            static ref FW: Mutex<Fw> = Mutex::new(Fw::new($guard_name(())));
+            pub static ref FW: std::sync::Mutex<Fw> = std::sync::Mutex::new(Fw::new($guard_name(())));
         }
     }
 }
