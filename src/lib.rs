@@ -18,20 +18,6 @@ use std::sync::Arc;
 use fw::{ ValType, ValTypeDesc, Fw, Val, DepType, Type, DepProp, Obj };
 use window::Rect;
 
-pub struct Size {
-    height: isize,
-    width: isize,
-}
-
-impl Size {
-    pub fn new(height: isize, width: isize) -> Size {
-        if height < 0 || width < 0 { panic!("Size must be non-negative."); }
-        Size { height: height, width: width }
-    }
-    pub fn height(&self) -> isize { self.height }
-    pub fn width(&self) -> isize { self.width }
-}
-
 pub struct Ntfl<I> {
     str_type: ValType<I>,
     bool_type: ValType<I>,
