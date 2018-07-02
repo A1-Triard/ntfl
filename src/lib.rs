@@ -18,14 +18,6 @@ use std::sync::Arc;
 use fw::{ ValType, ValTypeDesc, Fw, Val, DepType, Type, DepProp, Obj };
 use window::Rect;
 
-pub struct Ntfl<I> {
-    str_type: ValType<I>,
-    bool_type: ValType<I>,
-    rect_type: ValType<I>,
-    visual_type: DepType<I>,
-    visual_bounds_prop: DepProp<I>,
-}
-
 struct StrTypeDesc { }
 impl<I> ValTypeDesc<I> for StrTypeDesc {
     fn name(&self) -> &str { &"Str" }
@@ -93,19 +85,30 @@ impl<I> ValTypeDesc<I> for RectTypeDesc {
     }
 }
 
-impl<I> Ntfl<I> {
+pub struct Ntfl<I> {
+    str_type: ValType<I>,
+    bool_type: ValType<I>,
+    rect_type: ValType<I>,
+    visual_type: DepType<I>,
+    visual_bounds_prop: DepProp<I>,
+    root_type: DepType<I>,
+}
+
+impl<I : 'static> Ntfl<I> {
     pub fn new(fw: &mut Fw<I>) -> Ntfl<I> {
         let str_type = fw.reg_val_type(Box::new(StrTypeDesc { }));
         let bool_type = fw.reg_val_type(Box::new(BoolTypeDesc { }));
         let rect_type = fw.reg_val_type(Box::new(RectTypeDesc { }));
         let visual_type = fw.reg_dep_type(String::from("Visual"), None);
         let visual_bounds_prop = fw.reg_dep_prop(visual_type, String::from("Bounds"), Type::Val(rect_type), Obj::Val(rect_type.box_(Rect::empty())), None);
+        let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type));
         Ntfl {
             str_type: str_type,
             bool_type: bool_type,
             rect_type: rect_type,
             visual_type: visual_type,
             visual_bounds_prop: visual_bounds_prop,
+            root_type: root_type,
         }
     }
     pub fn str_type(&self) -> ValType<I> { self.str_type }
@@ -113,6 +116,7 @@ impl<I> Ntfl<I> {
     pub fn rect_type(&self) -> ValType<I> { self.rect_type }
     pub fn visual_type(&self) -> DepType<I> { self.visual_type }
     pub fn visual_bounds_prop(&self) -> DepProp<I> { self.visual_bounds_prop }
+    pub fn root_type(&self) -> DepType<I> { self.root_type }
 }
 
 #[cfg(test)]

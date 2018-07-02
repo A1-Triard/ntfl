@@ -2,13 +2,16 @@
 use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::hash_map::OccupiedEntry;
 use std::collections::hash_map::Entry::{ Occupied, Vacant };
 use std::fmt;
 use std::fmt::{ Debug, Formatter };
 use std::hash::{ Hash, Hasher };
 use std::marker::{ PhantomData, Send };
-use std::ops::Deref;
+use std::mem::replace;
+use std::ops::{ Deref, DerefMut };
 use std::sync::{ Arc, Mutex, MutexGuard };
+use either::{ Either, Left, Right };
 
 pub trait ValTypeDesc<I> : Send {
     fn name(&self) -> &str;
@@ -57,12 +60,17 @@ impl<I> Val<I> {
     }
 }
 
+struct DepPropClass<I> {
+    def_val: Option<Obj<I>>,
+    set_lock: Option<Arc<()>>,
+}
+
 struct DepTypeDesc<I> {
     base: Option<DepType<I>>,
     name: String,
     props: Vec<DepPropDesc<I>>,
     props_by_name: HashMap<String, DepProp<I>>,
-    def_val: HashMap<DepProp<I>, Obj<I>>,
+    prop_class: HashMap<DepProp<I>, DepPropClass<I>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -103,7 +111,7 @@ impl<I> DepType<I> {
     pub fn def_val(self, dep_prop: DepProp<I>, fw: &Fw<I>) -> &Obj<I> {
         assert_dep_prop_target(dep_prop, self, fw);
         fn self_def_val<I>(dep_type: DepType<I>, fw: &Fw<I>, dep_prop: DepProp<I>) -> Option<&Obj<I>> {
-            fw.dep_types[dep_type.0.index].def_val.get(&dep_prop)
+            fw.dep_types[dep_type.0.index].prop_class.get(&dep_prop).and_then(|c| { c.def_val.as_ref() })
         }
         let mut base = self;
         loop {
@@ -122,6 +130,19 @@ impl<I> DepType<I> {
             if base == dep_type { return true; }
             if let Some(t) = base.base(fw) { base = t; } else { return false; }
         }
+    }
+    fn set_lock(self, dep_prop: DepProp<I>, fw: &Fw<I>) -> Option<ClassSetLock> {
+        let mut base = self;
+        loop {
+            let maybe_lock = fw.dep_types.get(base.0.index).unwrap().prop_class.get(&dep_prop)
+                .and_then(|class| { class.set_lock.clone() })
+                .map(|lock| { ClassSetLock { set_lock: lock } });
+            if maybe_lock.is_some() { return maybe_lock; }
+            if let Some(t) = base.base(fw) { base = t; } else { return None; }
+        }
+    }
+    pub fn is_locked(self, dep_prop: DepProp<I>, fw: &Fw<I>) -> bool {
+        self.set_lock(dep_prop, fw).is_some()
     }
 }
 
@@ -267,10 +288,29 @@ impl<I> DepObj<I> {
         assert_dep_prop_target(dep_prop, self.type_, fw);
         GetRef { props: self.props.lock().unwrap(), fw: fw, dep_prop: dep_prop, dep_type: self.type_ }
     }
-    pub fn set(&self, dep_prop: DepProp<I>, val: Obj<I>, fw: &Fw<I>) {
+    pub fn set(&self, dep_prop: DepProp<I>, val: Obj<I>, fw: &Fw<I>) -> Result<(), ()> {
+        self.set_core(dep_prop, val, None, fw)
+    }
+    pub fn set_locked(&self, dep_prop: DepProp<I>, val: Obj<I>, lock: &ClassSetLock, fw: &Fw<I>) {
+        self.set_core(dep_prop, val, Some(lock), fw).unwrap();
+    }
+    fn set_core(&self, dep_prop: DepProp<I>, val: Obj<I>, lock: Option<&ClassSetLock>, fw: &Fw<I>) -> Result<(), ()> {
         assert_dep_prop_target(dep_prop, self.type_, fw);
         assert_dep_prop_val(dep_prop, val.type_(), fw);
+        let set_lock = self.type_.set_lock(dep_prop, fw);
+        if let Some(set_lock) = set_lock {
+            if let Some(lock) = lock {
+                if !Arc::ptr_eq(&set_lock.set_lock, &lock.set_lock) {
+                    panic!("Invalid class lock.");
+                }
+            } else {
+                return Err(());
+            }
+        } else if lock.is_some() {
+            panic!("Invalid class lock.");
+        }
         self.props.lock().unwrap().insert(dep_prop, val);
+        Ok(())
     }
     pub fn reset(&self, dep_prop: DepProp<I>, fw: &Fw<I>) {
         assert_dep_prop_target(dep_prop, self.type_, fw);
@@ -313,7 +353,29 @@ impl<I> Obj<I> {
     }
 }
 
-impl<I> Fw<I> {
+struct OccupiedDepPropClassRef<'a, I: 'static> {
+    entry: OccupiedEntry<'a, DepProp<I>, DepPropClass<I>>,
+}
+
+impl<'a, I> Deref for OccupiedDepPropClassRef<'a, I> {
+    type Target = DepPropClass<I>;
+
+    fn deref(&self) -> &DepPropClass<I> {
+        self.entry.get()
+    }
+}
+
+impl<'a, I> DerefMut for OccupiedDepPropClassRef<'a, I> {
+    fn deref_mut(&mut self) -> &mut DepPropClass<I> {
+        self.entry.get_mut()
+    }
+}
+
+pub struct ClassSetLock {
+    set_lock: Arc<()>,
+}
+
+impl<I: 'static> Fw<I> {
     pub fn new(_instance: I) -> Fw<I> {
         Fw { val_types: Vec::new(), val_types_by_name: HashMap::new(), dep_types: Vec::new(), dep_types_by_name: HashMap::new() }
     }
@@ -337,7 +399,7 @@ impl<I> Fw<I> {
         val_type
     }
     pub fn reg_dep_type(&mut self, name: String, base: Option<DepType<I>>) -> DepType<I> {
-        self.dep_types.push(DepTypeDesc { base: base, name: name, props: Vec::new(), props_by_name: HashMap::new(), def_val: HashMap::new() });
+        self.dep_types.push(DepTypeDesc { base: base, name: name, props: Vec::new(), props_by_name: HashMap::new(), prop_class: HashMap::new() });
         let dep_type = DepType(DepTypeI { index: self.dep_types.len() - 1 }, PhantomData);
         let name = &self.dep_types[dep_type.0.index].name;
         match self.dep_types_by_name.entry(name.clone()) {
@@ -345,6 +407,19 @@ impl<I> Fw<I> {
             Vacant(entry) => entry.insert(dep_type)
         };
         dep_type
+    }
+    fn dep_prop_class(&mut self, target: DepType<I>, prop: DepProp<I>) -> Either<OccupiedDepPropClassRef<I>, &mut DepPropClass<I>> {
+        match self.dep_types.get_mut(target.0.index).unwrap().prop_class.entry(prop) {
+            Occupied(entry) => Left(OccupiedDepPropClassRef { entry: entry }),
+            Vacant(entry) => Right(entry.insert(DepPropClass { def_val: None, set_lock: None }))
+        }
+    }
+    pub fn lock_set_class(&mut self, target: DepType<I>, prop: DepProp<I>) -> ClassSetLock {
+        if target.is_locked(prop, self) { panic!("Property setter is class-locked already."); }
+        let mut class = self.dep_prop_class(target, prop);
+        let lock = Arc::new(());
+        replace(&mut class.set_lock, Some(lock.clone()));
+        ClassSetLock { set_lock: lock }
     }
     pub fn reg_dep_prop(&mut self, owner: DepType<I>, name: String, val_type: Type<I>, def_val: Obj<I>, attached: Option<DepType<I>>) -> DepProp<I> {
         if !def_val.is(&val_type, self) { panic!("Default value type mismatch."); }
@@ -359,19 +434,17 @@ impl<I> Fw<I> {
             };
             dep_prop
         };
-        match self.dep_types.get_mut(attached.unwrap_or(owner).0.index).unwrap().def_val.entry(dep_prop) {
-            Occupied(_) => { panic!("DEF_VAL_EXISTS"); }
-            Vacant(entry) => entry.insert(def_val)
-        };
+        let mut class = self.dep_prop_class(attached.unwrap_or(owner), dep_prop);
+        if class.def_val.is_some() { panic!("DEF_VAL_EXISTS"); }
+        replace(&mut class.def_val, Some(def_val));
         dep_prop
     }
     pub fn override_def_val(&mut self, dep_type: DepType<I>, dep_prop: DepProp<I>, def_val: Obj<I>) {
         assert_dep_prop_target(dep_prop, dep_type, self);
         assert_dep_prop_val(dep_prop, def_val.type_(), self);
-        match self.dep_types.get_mut(dep_type.0.index).unwrap().def_val.entry(dep_prop) {
-            Occupied(_) => { panic!("Default value is registered already."); }
-            Vacant(entry) => entry.insert(def_val)
-        };
+        let mut class = self.dep_prop_class(dep_type, dep_prop);
+        if class.def_val.is_some() { panic!("Default value is registered already."); }
+        replace(&mut class.def_val, Some(def_val));
     }
 }
 
@@ -434,7 +507,7 @@ mod tests {
         assert_eq!("name", name_prop.name(&fw));
         let obj = obj_type.create();
         assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
-        obj.set(name_prop, Obj_Val(str_type.box_(String::from("local value"))), &fw);
+        obj.set(name_prop, Obj_Val(str_type.box_(String::from("local value"))), &fw).unwrap();
         assert_eq!("local value", obj.get(name_prop, &fw).unbox::<String>());
         obj.reset(name_prop, &fw);
         assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
