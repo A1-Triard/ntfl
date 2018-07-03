@@ -526,4 +526,24 @@ mod tests {
         assert!(base_type.is(base_type, &fw));
         assert!(!base_type.is(obj_type, &fw));
     }
+
+    #[test]
+    fn lock_set() {
+        replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
+        let mut fw = FW.lock().unwrap();
+        let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
+        let base_type = fw.reg_dep_type(String::from("base"), None);
+        let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type));
+        let prop = fw.reg_dep_prop(base_type, String::from("Prop"), Type_Val(str_type), Obj_Val(str_type.box_(String::from(""))), None);
+        let obj = obj_type.create();
+        assert_eq!("", obj.get(prop, &fw).unbox::<String>());
+        obj.set(prop, Obj_Val(str_type.box_(String::from("123"))), &fw).unwrap();
+        assert_eq!("123", obj.get(prop, &fw).unbox::<String>());
+        let lock = fw.lock_class_set(base_type, prop);
+        assert_eq!(Err(()), obj.set(prop, Obj_Val(str_type.box_(String::from("123"))), &fw));
+        assert_eq!(Err(()), obj.set(prop, Obj_Val(str_type.box_(String::from("234"))), &fw));
+        assert_eq!("123", obj.get(prop, &fw).unbox::<String>());
+        obj.set_locked(prop, Obj_Val(str_type.box_(String::from("234"))), &lock, &fw);
+        assert_eq!("234", obj.get(prop, &fw).unbox::<String>());
+    }
 }
