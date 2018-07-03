@@ -6,7 +6,7 @@ use std::ptr::null;
 use either::{ Either, Left, Right };
 use libc::{ setlocale, LC_ALL };
 
-use scr::{ Color, Scr, Texel };
+use scr::{ Color, Scr, Texel, Key };
 
 include!(concat!(env!("OUT_DIR"), "/c_bool.rs"));
 include!(concat!(env!("OUT_DIR"), "/ERR.rs"));
@@ -134,7 +134,7 @@ impl Scr for NCurses {
         unsafe { wrefresh(self.ptr) }.check()?;
         Ok(())
     }
-    fn getch(&mut self) -> Result<Either<u32, char>, ()> {
+    fn getch(&mut self) -> Result<Either<Key, char>, ()> {
         fn read_u8_tail<G>(b0: u8, g: &G) -> Result<u32, ()> where G : Fn() -> Result<u8, ()> {
             let next = || -> Result<u8, ()> {
                 let bi = g()?;
@@ -158,7 +158,7 @@ impl Scr for NCurses {
 
         let b0 = unsafe { wgetch(self.ptr) }.check()? as c_uint;
         if b0 & KEY_CODE_YES != 0 {
-            return Ok(Left(b0));
+            return Ok(Left(Key { value: b0 as u32 }));
         }
         let c = read_u8_tail(b0 as u8, &|| {
             let bi = unsafe { wgetch(self.ptr) }.check()? as c_uint;

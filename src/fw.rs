@@ -414,7 +414,7 @@ impl<I: 'static> Fw<I> {
             Vacant(entry) => Right(entry.insert(DepPropClass { def_val: None, set_lock: None }))
         }
     }
-    pub fn lock_set_class(&mut self, target: DepType<I>, prop: DepProp<I>) -> ClassSetLock {
+    pub fn lock_class_set(&mut self, target: DepType<I>, prop: DepProp<I>) -> ClassSetLock {
         if target.is_locked(prop, self) { panic!("Property setter is class-locked already."); }
         let mut class = self.dep_prop_class(target, prop);
         let lock = Arc::new(());

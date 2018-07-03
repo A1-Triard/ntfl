@@ -15,7 +15,11 @@ pub mod fw;
 pub mod inst;
 
 use std::sync::Arc;
-use fw::{ ValType, ValTypeDesc, Fw, Val, DepType, Type, DepProp, Obj };
+use either::{ Left, Right };
+use ncurses::NCurses;
+use scr::{ Scr, Key };
+use fw::{ ValType, ValTypeDesc, Fw, Val, DepType, Type, DepProp, Obj, ClassSetLock, DepObj };
+//use window::{ Rect, WindowsHost };
 use window::Rect;
 
 struct StrTypeDesc { }
@@ -92,6 +96,7 @@ pub struct Ntfl<I> {
     visual_type: DepType<I>,
     visual_bounds_prop: DepProp<I>,
     root_type: DepType<I>,
+    root_visual_bounds_lock: ClassSetLock,
 }
 
 impl<I : 'static> Ntfl<I> {
@@ -102,6 +107,7 @@ impl<I : 'static> Ntfl<I> {
         let visual_type = fw.reg_dep_type(String::from("Visual"), None);
         let visual_bounds_prop = fw.reg_dep_prop(visual_type, String::from("Bounds"), Type::Val(rect_type), Obj::Val(rect_type.box_(Rect::empty())), None);
         let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type));
+        let root_visual_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
         Ntfl {
             str_type: str_type,
             bool_type: bool_type,
@@ -109,6 +115,28 @@ impl<I : 'static> Ntfl<I> {
             visual_type: visual_type,
             visual_bounds_prop: visual_bounds_prop,
             root_type: root_type,
+            root_visual_bounds_lock: root_visual_bounds_lock,
+        }
+    }
+    pub fn run(&self, root: &DepObj<I>, fw: &Fw<I>) {
+        let mut scr = NCurses::new().unwrap();
+        //let mut host = WindowsHost::new();
+        let update_root_bounds = |scr: &Scr| {
+            let height = scr.get_height().unwrap();
+            let width = scr.get_width().unwrap();
+            root.set_locked(self.visual_bounds_prop, Obj::Val(self.rect_type.box_(Rect::tlhw(0, 0, height, width))), &self.root_visual_bounds_lock, fw);
+        };
+        update_root_bounds(&scr);
+        loop {
+            match scr.getch().unwrap() {
+                Left(Key::RESIZE) => {
+                    update_root_bounds(&scr);
+                },
+                Right('q') => {
+                    break;
+                }
+                _ => { }
+            }
         }
     }
     pub fn str_type(&self) -> ValType<I> { self.str_type }
