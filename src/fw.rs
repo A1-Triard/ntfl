@@ -146,55 +146,99 @@ impl<I> DepType<I> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-enum TypeI {
-    Val(ValTypeI),
-    Dep(DepTypeI),
-}
-
 pub enum Type<I> {
     Val(ValType<I>),
     Dep(DepType<I>),
+    Opt(Box<Type<I>>),
 }
 
-fn type_i<I>(t: Type<I>) -> TypeI {
-    match t {
-        Type::Val(v) => TypeI::Val(v.0),
-        Type::Dep(d) => TypeI::Dep(d.0)
+impl<I> Debug for Type<I> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Type::Val(v) => write!(f, "Val({:?})", v),
+            Type::Dep(d) => write!(f, "Dep({:?})", d),
+            Type::Opt(t) => write!(f, "Opt({:?})", t),
+        }
     }
 }
-
-fn i_type<I>(t: TypeI) -> Type<I> {
-    match t {
-        TypeI::Val(v) => Type::Val(ValType(v, PhantomData)),
-        TypeI::Dep(d) => Type::Dep(DepType(d, PhantomData))
+impl<I> Clone for Type<I> {
+    fn clone(&self) -> Self {
+        match self {
+            Type::Val(v) => Type::Val(v.clone()),
+            Type::Dep(d) => Type::Dep(d.clone()),
+            Type::Opt(t) => Type::Opt(t.clone()),
+        }
     }
 }
-
-impl<I> Debug for Type<I> { fn fmt(&self, f: &mut Formatter) -> fmt::Result { type_i(*self).fmt(f) } }
-impl<I> Copy for Type<I> { }
-impl<I> Clone for Type<I> { fn clone(&self) -> Self { i_type(type_i(*self).clone()) } }
-impl<I> PartialEq for Type<I> { fn eq(&self, other: &Type<I>) -> bool { type_i(*self) == type_i(*other) } }
+impl<I> PartialEq for Type<I> {
+    fn eq(&self, other: &Type<I>) -> bool {
+        match self {
+            Type::Val(v) => { if let Type::Val(o_v) = other { *v == *o_v } else { false } },
+            Type::Dep(d) => { if let Type::Dep(o_d) = other { *d == *o_d } else { false } },
+            Type::Opt(t) => { if let Type::Opt(o_t) = other { *t == *o_t } else { false } },
+        }
+    }
+}
 impl<I> Eq for Type<I> { }
-impl<I> Ord for Type<I> { fn cmp(&self, other: &Type<I>) -> Ordering { type_i(*self).cmp(&type_i(*other)) } }
+impl<I> Ord for Type<I> {
+    fn cmp(&self, other: &Type<I>) -> Ordering {
+        match self {
+            Type::Val(v) => {
+                match other {
+                    Type::Val(o_v) => v.cmp(o_v),
+                    Type::Dep(_) => Ordering::Less,
+                    Type::Opt(_) => Ordering::Less,
+                }
+            },
+            Type::Dep(d) => {
+                match other {
+                    Type::Val(_) => Ordering::Greater,
+                    Type::Dep(o_d) => d.cmp(o_d),
+                    Type::Opt(_) => Ordering::Less,
+                }
+            },
+            Type::Opt(t) => {
+                match other {
+                    Type::Val(_) => Ordering::Greater,
+                    Type::Dep(_) => Ordering::Greater,
+                    Type::Opt(o_t) => t.cmp(o_t),
+                }
+            },
+        }
+    }
+}
 impl<I> PartialOrd for Type<I> { fn partial_cmp(&self, other: &Type<I>) -> Option<Ordering> { Some(self.cmp(other)) } }
-impl<I> Hash for Type<I> { fn hash<H: Hasher>(&self, state: &mut H) { type_i(*self).hash(state); } }
+impl<I> Hash for Type<I> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Type::Val(v) => { state.write_u8(0); v.hash(state); },
+            Type::Dep(d) => { state.write_u8(1); d.hash(state); },
+            Type::Opt(t) => { state.write_u8(2); t.hash(state); },
+        }
+    }
+}
 
 impl<I> Type<I> {
     pub fn is(&self, type_: &Type<I>, fw: &Fw<I>) -> bool {
         match self {
-            &Type::Val(v) => {
+            Type::Val(v) => {
                 match type_ {
-                    &Type::Val(o_v) => v == o_v,
-                    &Type::Dep(_) => false
+                    Type::Val(o_v) => v == o_v,
+                    _ => false
                 }
             },
-            &Type::Dep(d) => {
+            Type::Dep(d) => {
                 match type_ {
-                    &Type::Val(_) => false,
-                    &Type::Dep(o_d) => d.is(o_d, fw)
+                    Type::Dep(o_d) => d.is(*o_d, fw),
+                    _ => false
                 }
-            }
+            },
+            Type::Opt(ref t) => {
+                match type_ {
+                    Type::Opt(ref o_t) => t.is(o_t, fw),
+                    _ => false
+                }
+            },
         }
     }
 }
@@ -324,28 +368,31 @@ impl<I> DepObj<I> {
 pub enum Obj<I> {
     Val(Arc<Val<I>>),
     Dep(Arc<DepObj<I>>),
+    Nil(Type<I>),
+    Has(Arc<Obj<I>>),
 }
 
 impl<I> Clone for Obj<I> {
     fn clone(&self) -> Self {
         match self {
-            &Obj::Val(ref v) => Obj::Val(v.clone()),
-            &Obj::Dep(ref d) => Obj::Dep(d.clone())
+            Obj::Val(ref v) => Obj::Val(v.clone()),
+            Obj::Dep(ref d) => Obj::Dep(d.clone()),
+            Obj::Nil(ref t) => Obj::Nil(t.clone()),
+            Obj::Has(ref o) => Obj::Has(o.clone()),
         }
     }
 }
 
 impl<I> Obj<I> {
     pub fn unbox<T: 'static>(&self) -> &T {
-        match self {
-            Obj::Val(ref v) => v.unbox(),
-            Obj::Dep(_) => { panic!("Cannot unbox a dependency object."); }
-        }
+        if let Obj::Val(ref v) = self { v.unbox() } else { panic!("Cannot unbox a non-value object."); }
     }
     pub fn type_(&self) -> Type<I> {
         match self {
-            &Obj::Val(ref v) => Type::Val(v.type_()),
-            &Obj::Dep(ref d) => Type::Dep(d.type_())
+            Obj::Val(ref v) => Type::Val(v.type_()),
+            Obj::Dep(ref d) => Type::Dep(d.type_()),
+            Obj::Nil(ref t) => Type::Opt(Box::new(t.clone())),
+            Obj::Has(ref o) => Type::Opt(Box::new(o.type_())),
         }
     }
     pub fn is(&self, type_: &Type<I>, fw: &Fw<I>) -> bool {

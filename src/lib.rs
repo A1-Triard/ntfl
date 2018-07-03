@@ -95,7 +95,7 @@ pub struct Ntfl<I> {
     rect_type: ValType<I>,
     visual_type: DepType<I>,
     visual_bounds_prop: DepProp<I>,
-    //visual_parent_prop: DepProp<I>,
+    visual_parent_prop: DepProp<I>,
     root_type: DepType<I>,
     root_visual_bounds_lock: ClassSetLock,
 }
@@ -107,7 +107,7 @@ impl<I : 'static> Ntfl<I> {
         let rect_type = fw.reg_val_type(Box::new(RectTypeDesc { }));
         let visual_type = fw.reg_dep_type(String::from("Visual"), None);
         let visual_bounds_prop = fw.reg_dep_prop(visual_type, String::from("Bounds"), Type::Val(rect_type), Obj::Val(rect_type.box_(Rect::empty())), None);
-        //let visual_parent_prop = fw.reg_dep_prop(visual_type, String::from("Parent"), Type::Dep(visual_type), Obj::Dep(rect_type.box_(Rect::empty())), None);
+        let visual_parent_prop = fw.reg_dep_prop(visual_type, String::from("Parent"), Type::Opt(Box::new(Type::Dep(visual_type))), Obj::Nil(Type::Dep(visual_type)), None);
         let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type));
         let root_visual_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
         Ntfl {
@@ -116,6 +116,7 @@ impl<I : 'static> Ntfl<I> {
             rect_type: rect_type,
             visual_type: visual_type,
             visual_bounds_prop: visual_bounds_prop,
+            visual_parent_prop: visual_parent_prop,
             root_type: root_type,
             root_visual_bounds_lock: root_visual_bounds_lock,
         }
@@ -146,6 +147,7 @@ impl<I : 'static> Ntfl<I> {
     pub fn rect_type(&self) -> ValType<I> { self.rect_type }
     pub fn visual_type(&self) -> DepType<I> { self.visual_type }
     pub fn visual_bounds_prop(&self) -> DepProp<I> { self.visual_bounds_prop }
+    pub fn visual_parent_prop(&self) -> DepProp<I> { self.visual_parent_prop }
     pub fn root_type(&self) -> DepType<I> { self.root_type }
 }
 
