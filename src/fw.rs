@@ -221,24 +221,9 @@ impl<I> Hash for Type<I> {
 impl<I> Type<I> {
     pub fn is(&self, type_: &Type<I>, fw: &Fw<I>) -> bool {
         match self {
-            Type::Val(v) => {
-                match type_ {
-                    Type::Val(o_v) => v == o_v,
-                    _ => false
-                }
-            },
-            Type::Dep(d) => {
-                match type_ {
-                    Type::Dep(o_d) => d.is(*o_d, fw),
-                    _ => false
-                }
-            },
-            Type::Opt(ref t) => {
-                match type_ {
-                    Type::Opt(ref o_t) => t.is(o_t, fw),
-                    _ => false
-                }
-            },
+            Type::Val(v) => { if let Type::Val(o_v) = type_ { v == o_v } else { false } },
+            Type::Dep(d) => { if let Type::Dep(o_d) = type_ { d.is(*o_d, fw) } else { false } },
+            Type::Opt(ref t) => { if let Type::Opt(ref o_t) = type_ { t.is(o_t, fw) } else { false } },
         }
     }
 }
