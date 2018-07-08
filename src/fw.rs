@@ -62,7 +62,8 @@ impl<I> Val<I> {
 
 struct DepPropClass<I> {
     def_val: Option<Obj<I>>,
-    set_lock: Option<Arc<()>>,
+    set_lock: Option<ClassSetLock>,
+    on_changed: Vec<Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Any, &Fw<I>) + Send>>,
 }
 
 struct DepTypeDesc<I> {
@@ -122,7 +123,7 @@ impl<I> DepType<I> {
         }
     }
     pub fn create(self) -> Arc<DepObj<I>> {
-        Arc::new(DepObj { type_: self, props: Mutex::new(HashMap::new()) })
+        Arc::new(DepObj { type_: self, props: Mutex::new(HashMap::new()), data: Mutex::new(HashMap::new()) })
     }
     pub fn is(self, dep_type: DepType<I>, fw: &Fw<I>) -> bool {
         let mut base = self;
@@ -135,8 +136,7 @@ impl<I> DepType<I> {
         let mut base = self;
         loop {
             let maybe_lock = fw.dep_types.get(base.0.index).unwrap().prop_class.get(&dep_prop)
-                .and_then(|class| { class.set_lock.clone() })
-                .map(|lock| { ClassSetLock { set_lock: lock } });
+                .and_then(|class| { class.set_lock.clone() });
             if maybe_lock.is_some() { return maybe_lock; }
             if let Some(t) = base.base(fw) { base = t; } else { return None; }
         }
@@ -274,9 +274,30 @@ pub struct Fw<I> {
     dep_types_by_name: HashMap<String, DepType<I>>
 }
 
+#[derive(Debug, Clone)]
+pub struct Unique(Arc<()>);
+
+impl PartialEq for Unique { fn eq(&self, other: &Unique) -> bool { Arc::ptr_eq(&self.0, &other.0) } }
+impl Eq for Unique { }
+impl Ord for Unique { fn cmp(&self, other: &Unique) -> Ordering { (&*self.0 as *const ()).cmp(&(&*other.0 as *const ())) } }
+impl PartialOrd for Unique { fn partial_cmp(&self, other: &Unique) -> Option<Ordering> { Some(self.cmp(other)) } }
+impl Hash for Unique { fn hash<H: Hasher>(&self, state: &mut H) { (&*self.0 as *const ()).hash(state); } }
+
+impl Unique {
+    pub fn new() -> Unique { Unique(Arc::new(())) }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct DepObjDataKey(Unique);
+
+impl DepObjDataKey {
+    pub fn new() -> DepObjDataKey { DepObjDataKey(Unique::new()) }
+}
+
 pub struct DepObj<I> {
     type_: DepType<I>,
     props: Mutex<HashMap<DepProp<I>, Obj<I>>>,
+    data: Mutex<HashMap<DepObjDataKey, Box<Any + Send>>>,
 }
 
 pub struct GetRef<'a, I : 'static> {
@@ -307,6 +328,17 @@ impl<'a, I> GetNonDefRef<'a, I> {
     }
 }
 
+pub struct GetDataRef<'a> {
+    data: MutexGuard<'a, HashMap<DepObjDataKey, Box<Any + Send>>>,
+    key: &'a DepObjDataKey,
+}
+
+impl<'a> GetDataRef<'a> {
+    pub fn borrow(&self) -> Option<&Box<Any + Send>> {
+        self.data.get(&self.key)
+    }
+}
+
 impl<I> DepObj<I> {
     pub fn type_(&self) -> DepType<I> { self.type_ }
     pub fn get_non_def<'a>(&'a self, dep_prop: DepProp<I>, fw: &Fw<I>) -> GetNonDefRef<'a, I> {
@@ -317,6 +349,15 @@ impl<I> DepObj<I> {
         assert_dep_prop_target(dep_prop, self.type_, fw);
         GetRef { props: self.props.lock().unwrap(), fw: fw, dep_prop: dep_prop, dep_type: self.type_ }
     }
+    pub fn get_data<'a>(&'a self, key: &'a DepObjDataKey) -> GetDataRef<'a> {
+        GetDataRef { data: self.data.lock().unwrap(), key: key }
+    }
+    pub fn set_data(&self, key: DepObjDataKey, value: Box<Any + Send>) {
+        self.data.lock().unwrap().insert(key, value);
+    }
+    pub fn reset_data(&self, key: &DepObjDataKey) {
+        self.data.lock().unwrap().remove(key);
+    }
     pub fn set(&self, dep_prop: DepProp<I>, val: Obj<I>, fw: &Fw<I>) -> Result<(), ()> {
         self.set_core(dep_prop, val, None, fw)
     }
@@ -324,12 +365,17 @@ impl<I> DepObj<I> {
         self.set_core(dep_prop, val, Some(lock), fw).unwrap();
     }
     fn set_core(&self, dep_prop: DepProp<I>, val: Obj<I>, lock: Option<&ClassSetLock>, fw: &Fw<I>) -> Result<(), ()> {
-        assert_dep_prop_target(dep_prop, self.type_, fw);
         assert_dep_prop_val(dep_prop, val.type_(), fw);
+        self.check_set(dep_prop, lock, fw)?;
+        self.props.lock().unwrap().insert(dep_prop, val);
+        Ok(())
+    }
+    fn check_set(&self, dep_prop: DepProp<I>, lock: Option<&ClassSetLock>, fw: &Fw<I>) -> Result<(), ()> {
+        assert_dep_prop_target(dep_prop, self.type_, fw);
         let set_lock = self.type_.set_lock(dep_prop, fw);
         if let Some(set_lock) = set_lock {
             if let Some(lock) = lock {
-                if !Arc::ptr_eq(&set_lock.set_lock, &lock.set_lock) {
+                if set_lock != *lock {
                     panic!("Invalid class lock.");
                 }
             } else {
@@ -338,12 +384,18 @@ impl<I> DepObj<I> {
         } else if lock.is_some() {
             panic!("Invalid class lock.");
         }
-        self.props.lock().unwrap().insert(dep_prop, val);
         Ok(())
     }
-    pub fn reset(&self, dep_prop: DepProp<I>, fw: &Fw<I>) {
-        assert_dep_prop_target(dep_prop, self.type_, fw);
+    pub fn reset(&self, dep_prop: DepProp<I>, fw: &Fw<I>) -> Result<(), ()> {
+        self.reset_core(dep_prop, None, fw)
+    }
+    pub fn reset_locked(&self, dep_prop: DepProp<I>, lock: &ClassSetLock, fw: &Fw<I>) -> Result<(), ()> {
+        self.reset_core(dep_prop, Some(lock), fw)
+    }
+    fn reset_core(&self, dep_prop: DepProp<I>, lock: Option<&ClassSetLock>, fw: &Fw<I>) -> Result<(), ()> {
+        self.check_set(dep_prop, lock, fw)?;
         self.props.lock().unwrap().remove(&dep_prop);
+        Ok(())
     }
     pub fn is(&self, dep_type: DepType<I>, fw: &Fw<I>) -> bool {
         self.type_.is(dep_type, fw)
@@ -403,9 +455,8 @@ impl<'a, I> DerefMut for OccupiedDepPropClassRef<'a, I> {
     }
 }
 
-pub struct ClassSetLock {
-    set_lock: Arc<()>,
-}
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct ClassSetLock(Unique);
 
 impl<I: 'static> Fw<I> {
     pub fn new(_instance: I) -> Fw<I> {
@@ -443,15 +494,15 @@ impl<I: 'static> Fw<I> {
     fn dep_prop_class(&mut self, target: DepType<I>, prop: DepProp<I>) -> Either<OccupiedDepPropClassRef<I>, &mut DepPropClass<I>> {
         match self.dep_types.get_mut(target.0.index).unwrap().prop_class.entry(prop) {
             Occupied(entry) => Left(OccupiedDepPropClassRef { entry: entry }),
-            Vacant(entry) => Right(entry.insert(DepPropClass { def_val: None, set_lock: None }))
+            Vacant(entry) => Right(entry.insert(DepPropClass { def_val: None, set_lock: None, on_changed: Vec::new() }))
         }
     }
     pub fn lock_class_set(&mut self, target: DepType<I>, prop: DepProp<I>) -> ClassSetLock {
         if target.is_locked(prop, self) { panic!("Property setter is class-locked already."); }
         let mut class = self.dep_prop_class(target, prop);
-        let lock = Arc::new(());
+        let lock = ClassSetLock(Unique::new());
         replace(&mut class.set_lock, Some(lock.clone()));
-        ClassSetLock { set_lock: lock }
+        lock
     }
     pub fn reg_dep_prop(&mut self, owner: DepType<I>, name: String, val_type: Type<I>, def_val: Obj<I>, attached: Option<DepType<I>>) -> DepProp<I> {
         if !def_val.is(&val_type, self) { panic!("Default value type mismatch."); }
@@ -478,6 +529,11 @@ impl<I: 'static> Fw<I> {
         if class.def_val.is_some() { panic!("Default value is registered already."); }
         replace(&mut class.def_val, Some(def_val));
     }
+    pub fn on_changed(&mut self, dep_type: DepType<I>, dep_prop: DepProp<I>, callback: Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Any, &Fw<I>) + Send>) {
+        assert_dep_prop_target(dep_prop, dep_type, self);
+        let mut class = self.dep_prop_class(dep_type, dep_prop);
+        class.on_changed.push(callback);
+    }
 }
 
 #[macro_export]
@@ -499,7 +555,7 @@ mod tests {
     use std::ops::DerefMut;
     use std::sync::{ Arc, Mutex };
     use fw;
-    use fw::ValTypeDesc;
+    use fw::{ ValTypeDesc, DepObjDataKey };
     pub use fw::Obj::Val as Obj_Val;
     pub use fw::Type::Val as Type_Val;
 
@@ -541,10 +597,13 @@ mod tests {
         assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
         obj.set(name_prop, Obj_Val(str_type.box_(String::from("local value"))), &fw).unwrap();
         assert_eq!("local value", obj.get(name_prop, &fw).unbox::<String>());
-        obj.reset(name_prop, &fw);
+        obj.reset(name_prop, &fw).unwrap();
         assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
-        obj.reset(name_prop, &fw);
+        obj.reset(name_prop, &fw).unwrap();
         assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
+        let lock = fw.lock_class_set(obj_type, name_prop);
+        assert_eq!(Err(()), obj.reset(name_prop, &fw));
+        obj.reset_locked(name_prop, &lock, &fw).unwrap();
     }
 
     #[test]
@@ -577,5 +636,17 @@ mod tests {
         assert_eq!("123", obj.get(prop, &fw).unbox::<String>());
         obj.set_locked(prop, Obj_Val(str_type.box_(String::from("234"))), &lock, &fw);
         assert_eq!("234", obj.get(prop, &fw).unbox::<String>());
+    }
+
+    #[test]
+    fn depobj_data() {
+        replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
+        let mut fw = FW.lock().unwrap();
+        let obj_type = fw.reg_dep_type(String::from("obj"), None);
+        let obj = obj_type.create();
+        let key = DepObjDataKey::new();
+        assert!(obj.get_data(&key).borrow().is_none());
+        obj.set_data(key.clone(), Box::new(13 as i32));
+        assert_eq!(13 as i32, *obj.get_data(&key).borrow().unwrap().downcast_ref::<i32>().unwrap());
     }
 }

@@ -102,6 +102,7 @@ pub struct Ntfl<I> {
 
 impl<I : 'static> Ntfl<I> {
     pub fn new(fw: &mut Fw<I>) -> Ntfl<I> {
+        //let host = Rc::new(RefCell::new(WindowsHost::new()));
         let str_type = fw.reg_val_type(Box::new(StrTypeDesc { }));
         let bool_type = fw.reg_val_type(Box::new(BoolTypeDesc { }));
         let rect_type = fw.reg_val_type(Box::new(RectTypeDesc { }));
@@ -110,6 +111,15 @@ impl<I : 'static> Ntfl<I> {
         let visual_parent_prop = fw.reg_dep_prop(visual_type, String::from("Parent"), Type::Opt(Box::new(Type::Dep(visual_type))), Obj::Nil(Type::Dep(visual_type)), None);
         let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type));
         let root_visual_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
+        //{
+            //let host = host.clone();
+            //fw.on_changed(visual_type, visual_parent_prop, Box::new(move |d, o, n, a, fw| {
+                //let mut window = host.borrow_mut().new_window();
+                ////let ntfl: &Ntfl<I> = &**a.downcast_ref::<*const Ntfl<I>>().unwrap();
+                ////ntfl.
+
+            //}));
+        //}
         Ntfl {
             str_type: str_type,
             bool_type: bool_type,
@@ -123,7 +133,6 @@ impl<I : 'static> Ntfl<I> {
     }
     pub fn run(&self, root: &DepObj<I>, fw: &Fw<I>) {
         let mut scr = NCurses::new().unwrap();
-        //let mut host = WindowsHost::new();
         let update_root_bounds = |scr: &Scr| {
             let height = scr.get_height().unwrap();
             let width = scr.get_width().unwrap();
