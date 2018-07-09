@@ -1,6 +1,6 @@
 #![deny(warnings)]
 
-use std::cell::{ Ref, RefCell, RefMut };
+use std::cell::{ Ref, RefCell };
 use std::cmp::{ min, max };
 use std::mem::replace;
 use std::ops::DerefMut;
@@ -273,17 +273,16 @@ impl Window {
             self.host.borrow_mut().invalid.union(new_bounds);
         }
     }
-    pub fn attach(&mut self, host: &mut WindowsHost) {
-        self.attach_core(host, |x| { &x.val }, |x| { RefMut::map(x.val.borrow_mut(), |y| { &mut y.windows }) }, |_| { None });
+    pub fn attach(&mut self) {
+        if self.data.borrow().parent.is_some() { panic!("Window is attached already.") }
+        self.host.borrow_mut().windows.push(Rc::clone(&self.data));
+        replace(&mut self.data.borrow_mut().parent, Some(None));
     }
     pub fn attach_to(&mut self, parent: &mut Window) {
-        self.attach_core(parent, |x| { &x.host }, |x| { RefMut::map(x.data.borrow_mut(), |y| { &mut y.subwindows }) }, |x| { Some(Rc::clone(&x.data)) });
-    }
-    fn attach_core<'a, T: 'static, H: Fn(&T) -> &Rc<RefCell<WindowsHostValue>>, L: Fn(&mut T) -> RefMut<Vec<Rc<RefCell<WindowData>>>>, P: Fn(&T) -> Option<Rc<RefCell<WindowData>>>>(&mut self, parent_ref: &'a mut T, host: H, windows: L, parent: P) {
-        if !Rc::ptr_eq(&self.host, host(parent_ref)) { panic!("Foreign window host.") }
+        if !Rc::ptr_eq(&self.host, &parent.host) { panic!("Foreign window.") }
         if self.data.borrow().parent.is_some() { panic!("Window is attached already.") }
-        windows(parent_ref).push(Rc::clone(&self.data));
-        replace(&mut self.data.borrow_mut().parent, Some(parent(parent_ref)));
+        parent.data.borrow_mut().subwindows.push(Rc::clone(&self.data));
+        replace(&mut self.data.borrow_mut().parent, Some(Some(Rc::clone(&parent.data))));
     }
     pub fn detach(&mut self) {
         if !self.detach_core() { panic!("Window is detached already.") }
@@ -409,7 +408,7 @@ mod tests {
         let mut s = TestScr::new(100, 100);
         let mut host = WindowsHost::new();
         let mut window = host.new_window();
-        window.attach(&mut host);
+        window.attach();
         window.set_bounds(Rect::tlhw(3, 5, 1, 2));
         host.scr(&mut s);
     }
@@ -419,7 +418,7 @@ mod tests {
         let mut s = TestScr::new(100, 100);
         let mut host = WindowsHost::new();
         let mut window = host.new_window();
-        window.attach(&mut host);
+        window.attach();
         window.set_bounds(Rect::tlhw(3, 5, 1, 2));
         window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
@@ -432,7 +431,7 @@ mod tests {
     fn subwindow_bounds() {
         let mut host = WindowsHost::new();
         let mut window = host.new_window();
-        window.attach(&mut host);
+        window.attach();
         let mut sub = host.new_window();
         sub.attach_to(&mut window);
         sub.set_bounds(Rect::tlhw(1, 1, 1, 1));
@@ -444,7 +443,7 @@ mod tests {
         let mut s = TestScr::new(100, 100);
         let mut host = WindowsHost::new();
         let mut window = host.new_window();
-        window.attach(&mut host);
+        window.attach();
         window.set_bounds(Rect::tlhw(-1, -5, 1, 2));
         window.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         window.out(0, 1, Texel { ch: '-', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
@@ -456,7 +455,7 @@ mod tests {
         let mut s = TestScr::new(100, 100);
         let mut host = WindowsHost::new();
         let mut window = host.new_window();
-        window.attach(&mut host);
+        window.attach();
         window.set_bounds(Rect::tlhw(-10, -20, 30, 40));
         {
             let mut sub = host.new_window();
@@ -491,11 +490,11 @@ mod tests {
         let mut scr = TestScr::new(4, 4);
         let mut host = WindowsHost::new();
         let mut window1 = host.new_window();
-        window1.attach(&mut host);
+        window1.attach();
         window1.set_bounds(Rect::tlhw(0, 0, 3, 3));
         fill3x3(&mut window1, Color::Green);
         let mut window2 = host.new_window();
-        window2.attach(&mut host);
+        window2.attach();
         window2.set_bounds(Rect::tlhw(1, 1, 3, 3));
         fill3x3(&mut window2, Color::Red);
         host.scr(&mut scr);
@@ -548,7 +547,7 @@ mod tests {
         let mut scr = TestScr::new(10, 136);
         let mut host = WindowsHost::new();
         let mut window = host.new_window();
-        window.attach(&mut host);
+        window.attach();
         window.set_bounds(Rect::tlhw(0, 0, 10, 136));
         window.out(6, 133, Texel { ch: 'A', attr: Attr::NORMAL, fg: Color::Green, bg: None });
         window.out(6, 134, Texel { ch: 'B', attr: Attr::NORMAL, fg: Color::Green, bg: None });
@@ -565,10 +564,10 @@ mod tests {
         let mut scr = TestScr::new(4, 4);
         let mut host = WindowsHost::new();
         let mut window1 = host.new_window();
-        window1.attach(&mut host);
+        window1.attach();
         window1.set_bounds(Rect::tlhw(0, 0, 4, 2));
         let mut window2 = host.new_window();
-        window2.attach(&mut host);
+        window2.attach();
         window2.set_bounds(Rect::tlhw(0, 2, 4, 2));
         let mut sub1 = host.new_window();
         sub1.attach_to(&mut window1);

@@ -178,12 +178,12 @@ mod tests {
         let height = scr.get_height().unwrap();
         let width = scr.get_width().unwrap();
         let mut bg = host.new_window();
-        bg.attach(&mut host);
+        bg.attach();
         bg.set_bounds(Rect::tlhw(0, 0, height, width));
         let bg_area = bg.area();
         fill_rect(&mut bg, &bg_area, &' ', Attr::NORMAL, Color::Black, None);
         let mut window = host.new_window();
-        window.attach(&mut host);
+        window.attach();
         window.set_bounds(Rect::tlhw(0, 0, 13, 40));
         let window_area = window.area();
         fill_rect(&mut window, &window_area, &' ', Attr::NORMAL, Color::Black, None);
