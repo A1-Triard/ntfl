@@ -14,11 +14,13 @@ pub mod draw;
 pub mod fw;
 pub mod inst;
 
+//use std::rc::Rc;
+//use std::sync::{ Arc, Mutex };
 use std::sync::Arc;
 use either::{ Left, Right };
 use ncurses::NCurses;
 use scr::{ Scr, Key };
-use fw::{ ValType, ValTypeDesc, Fw, Val, DepType, Type, DepProp, Obj, ClassSetLock, DepObj };
+use fw::{ ValType, ValTypeDesc, Fw, Val, DepType, Type, DepProp, Obj, ClassSetLock, DepObj, DepObjDataKey };
 //use window::{ Rect, WindowsHost };
 use window::Rect;
 
@@ -102,21 +104,22 @@ pub struct Ntfl<I> {
 
 impl<I : 'static> Ntfl<I> {
     pub fn new(fw: &mut Fw<I>) -> Ntfl<I> {
-        //let host = Rc::new(RefCell::new(WindowsHost::new()));
+        //let host = Rc::new(Mutex::new(WindowsHost::new()));
         let str_type = fw.reg_val_type(Box::new(StrTypeDesc { }));
         let bool_type = fw.reg_val_type(Box::new(BoolTypeDesc { }));
         let rect_type = fw.reg_val_type(Box::new(RectTypeDesc { }));
         let visual_type = fw.reg_dep_type(String::from("Visual"), None);
+        let _visual_window = DepObjDataKey::new();
         let visual_bounds_prop = fw.reg_dep_prop(visual_type, String::from("Bounds"), Type::Val(rect_type), Obj::Val(rect_type.box_(Rect::empty())), None);
         let visual_parent_prop = fw.reg_dep_prop(visual_type, String::from("Parent"), Type::Opt(Box::new(Type::Dep(visual_type))), Obj::Nil(Type::Dep(visual_type)), None);
         let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type));
         let root_visual_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
         //{
             //let host = host.clone();
-            //fw.on_changed(visual_type, visual_parent_prop, Box::new(move |d, o, n, a, fw| {
-                //let mut window = host.borrow_mut().new_window();
+            //fw.on_changed(visual_type, visual_parent_prop, Box::new(move |d, o, n, fw| {
+                //let mut window = host.lock().unwrap().new_window();
                 ////let ntfl: &Ntfl<I> = &**a.downcast_ref::<*const Ntfl<I>>().unwrap();
-                ////ntfl.
+                //////ntfl.
 
             //}));
         //}
@@ -175,10 +178,12 @@ mod tests {
         let height = scr.get_height().unwrap();
         let width = scr.get_width().unwrap();
         let mut bg = host.new_window();
+        bg.attach(&mut host);
         bg.set_bounds(Rect::tlhw(0, 0, height, width));
         let bg_area = bg.area();
         fill_rect(&mut bg, &bg_area, &' ', Attr::NORMAL, Color::Black, None);
         let mut window = host.new_window();
+        window.attach(&mut host);
         window.set_bounds(Rect::tlhw(0, 0, 13, 40));
         let window_area = window.area();
         fill_rect(&mut window, &window_area, &' ', Attr::NORMAL, Color::Black, None);

@@ -63,7 +63,7 @@ impl<I> Val<I> {
 struct DepPropClass<I> {
     def_val: Option<Obj<I>>,
     set_lock: Option<ClassSetLock>,
-    on_changed: Vec<Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Any, &Fw<I>) + Send>>,
+    on_changed: Vec<Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Fw<I>) + Send>>,
 }
 
 struct DepTypeDesc<I> {
@@ -529,7 +529,7 @@ impl<I: 'static> Fw<I> {
         if class.def_val.is_some() { panic!("Default value is registered already."); }
         replace(&mut class.def_val, Some(def_val));
     }
-    pub fn on_changed(&mut self, dep_type: DepType<I>, dep_prop: DepProp<I>, callback: Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Any, &Fw<I>) + Send>) {
+    pub fn on_changed(&mut self, dep_type: DepType<I>, dep_prop: DepProp<I>, callback: Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Fw<I>) + Send>) {
         assert_dep_prop_target(dep_prop, dep_type, self);
         let mut class = self.dep_prop_class(dep_type, dep_prop);
         class.on_changed.push(callback);
