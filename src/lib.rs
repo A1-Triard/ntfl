@@ -108,11 +108,11 @@ impl<I : 'static> Ntfl<I> {
         let str_type = fw.reg_val_type(Box::new(StrTypeDesc { }));
         let bool_type = fw.reg_val_type(Box::new(BoolTypeDesc { }));
         let rect_type = fw.reg_val_type(Box::new(RectTypeDesc { }));
-        let visual_type = fw.reg_dep_type(String::from("Visual"), None);
+        let visual_type = fw.reg_dep_type(String::from("Visual"), None, None);
         let _visual_window = DepObjDataKey::new();
         let visual_bounds_prop = fw.reg_dep_prop(visual_type, String::from("Bounds"), Type::Val(rect_type), Obj::Val(rect_type.box_(Rect::empty())), None);
         let visual_parent_prop = fw.reg_dep_prop(visual_type, String::from("Parent"), Type::Opt(Box::new(Type::Dep(visual_type))), Obj::Nil(Type::Dep(visual_type)), None);
-        let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type));
+        let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type), None);
         let root_visual_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
         //{
             //let host = host.clone();

@@ -72,6 +72,7 @@ struct DepTypeDesc<I> {
     props: Vec<DepPropDesc<I>>,
     props_by_name: HashMap<String, DepProp<I>>,
     prop_class: HashMap<DepProp<I>, DepPropClass<I>>,
+    ctor: Option<Box<Fn(&Arc<DepObj<I>>, &Fw<I>) + Send>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -122,8 +123,18 @@ impl<I> DepType<I> {
             if let Some(t) = base.base(fw) { base = t; } else { panic!("DEF_VAL_NOT_FOUND"); }
         }
     }
-    pub fn create(self) -> Arc<DepObj<I>> {
-        Arc::new(DepObj { type_: self, props: Mutex::new(HashMap::new()), data: Mutex::new(HashMap::new()) })
+    fn init(self, obj: &Arc<DepObj<I>>, fw: &Fw<I>) {
+        if let Some(base) = self.base(fw) {
+            base.init(obj, fw);
+        }
+        if let Some(ref ctor) = fw.dep_types[self.0.index].ctor {
+            ctor(obj, fw);
+        }
+    }
+    pub fn create(self, fw: &Fw<I>) -> Arc<DepObj<I>> {
+        let obj = Arc::new(DepObj { type_: self, props: Mutex::new(HashMap::new()), data: Mutex::new(HashMap::new()) });
+        self.init(&obj, fw);
+        obj
     }
     pub fn is(self, dep_type: DepType<I>, fw: &Fw<I>) -> bool {
         let mut base = self;
@@ -481,8 +492,11 @@ impl<I: 'static> Fw<I> {
         };
         val_type
     }
-    pub fn reg_dep_type(&mut self, name: String, base: Option<DepType<I>>) -> DepType<I> {
-        self.dep_types.push(DepTypeDesc { base: base, name: name, props: Vec::new(), props_by_name: HashMap::new(), prop_class: HashMap::new() });
+    pub fn reg_dep_type(&mut self, name: String, base: Option<DepType<I>>, ctor: Option<Box<Fn(&Arc<DepObj<I>>, &Fw<I>) + Send>>) -> DepType<I> {
+        self.dep_types.push(DepTypeDesc {
+            base: base, name: name, props: Vec::new(), props_by_name: HashMap::new(), prop_class: HashMap::new(),
+            ctor: ctor
+        });
         let dep_type = DepType(DepTypeI { index: self.dep_types.len() - 1 }, PhantomData);
         let name = &self.dep_types[dep_type.0.index].name;
         match self.dep_types_by_name.entry(name.clone()) {
@@ -590,10 +604,10 @@ mod tests {
         replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
         let mut fw = FW.lock().unwrap();
         let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
-        let obj_type = fw.reg_dep_type(String::from("obj"), None);
+        let obj_type = fw.reg_dep_type(String::from("obj"), None, None);
         let name_prop = fw.reg_dep_prop(obj_type, String::from("name"), Type_Val(str_type), Obj_Val(str_type.box_(String::from("x"))), None);
         assert_eq!("name", name_prop.name(&fw));
-        let obj = obj_type.create();
+        let obj = obj_type.create(&fw);
         assert_eq!("x", obj.get(name_prop, &fw).unbox::<String>());
         obj.set(name_prop, Obj_Val(str_type.box_(String::from("local value"))), &fw).unwrap();
         assert_eq!("local value", obj.get(name_prop, &fw).unbox::<String>());
@@ -610,8 +624,8 @@ mod tests {
     fn is_base() {
         replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
         let mut fw = FW.lock().unwrap();
-        let base_type = fw.reg_dep_type(String::from("base"), None);
-        let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type));
+        let base_type = fw.reg_dep_type(String::from("base"), None, None);
+        let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type), None);
         assert!(obj_type.is(base_type, &fw));
         assert!(obj_type.is(obj_type, &fw));
         assert!(base_type.is(base_type, &fw));
@@ -623,10 +637,10 @@ mod tests {
         replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
         let mut fw = FW.lock().unwrap();
         let str_type = fw.reg_val_type(Box::new(StrValTypeDesc { }));
-        let base_type = fw.reg_dep_type(String::from("base"), None);
-        let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type));
+        let base_type = fw.reg_dep_type(String::from("base"), None, None);
+        let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type), None);
         let prop = fw.reg_dep_prop(base_type, String::from("Prop"), Type_Val(str_type), Obj_Val(str_type.box_(String::from(""))), None);
-        let obj = obj_type.create();
+        let obj = obj_type.create(&fw);
         assert_eq!("", obj.get(prop, &fw).unbox::<String>());
         obj.set(prop, Obj_Val(str_type.box_(String::from("123"))), &fw).unwrap();
         assert_eq!("123", obj.get(prop, &fw).unbox::<String>());
@@ -642,11 +656,30 @@ mod tests {
     fn depobj_data() {
         replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
         let mut fw = FW.lock().unwrap();
-        let obj_type = fw.reg_dep_type(String::from("obj"), None);
-        let obj = obj_type.create();
+        let obj_type = fw.reg_dep_type(String::from("obj"), None, None);
+        let obj = obj_type.create(&fw);
         let key = DepObjDataKey::new();
         assert!(obj.get_data(&key).borrow().is_none());
         obj.set_data(key.clone(), Box::new(13 as i32));
         assert_eq!(13 as i32, *obj.get_data(&key).borrow().unwrap().downcast_ref::<i32>().unwrap());
+    }
+
+    #[test]
+    fn ctor_test() {
+        replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
+        let mut fw = FW.lock().unwrap();
+        let base_value = DepObjDataKey::new();
+        let base_value_key = base_value.clone();
+        let base_type = fw.reg_dep_type(String::from("base"), None, Some(Box::new(move |obj, _fw| {
+            obj.set_data(base_value_key.clone(), Box::new(18 as i32));
+        })));
+        let base_value_key = base_value.clone();
+        let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type), Some(Box::new(move |obj, _fw| {
+            let base = *obj.get_data(&base_value_key).borrow().unwrap().downcast_ref::<i32>().unwrap();
+            obj.set_data(base_value_key.clone(), Box::new(base + 1));
+        })));
+        let obj = obj_type.create(&fw);
+        let value = *obj.get_data(&base_value).borrow().unwrap().downcast_ref::<i32>().unwrap();
+        assert_eq!(19 as i32, value);
     }
 }
