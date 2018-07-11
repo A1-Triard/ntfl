@@ -669,15 +669,19 @@ mod tests {
         replace(FW.lock().unwrap().deref_mut(), Fw::new(TestFw(())));
         let mut fw = FW.lock().unwrap();
         let base_value = DepObjDataKey::new();
-        let base_value_key = base_value.clone();
-        let base_type = fw.reg_dep_type(String::from("base"), None, Some(Box::new(move |obj, _fw| {
-            obj.set_data(base_value_key.clone(), Box::new(18 as i32));
-        })));
-        let base_value_key = base_value.clone();
-        let obj_type = fw.reg_dep_type(String::from("obj"), Some(base_type), Some(Box::new(move |obj, _fw| {
-            let base = *obj.get_data(&base_value_key).borrow().unwrap().downcast_ref::<i32>().unwrap();
-            obj.set_data(base_value_key.clone(), Box::new(base + 1));
-        })));
+        let base_type = {
+            let base_value = base_value.clone();
+            fw.reg_dep_type(String::from("base"), None, Some(Box::new(move |obj, _fw| {
+                obj.set_data(base_value.clone(), Box::new(18 as i32));
+            })))
+        };
+        let obj_type = {
+            let base_value = base_value.clone();
+            fw.reg_dep_type(String::from("obj"), Some(base_type), Some(Box::new(move |obj, _fw| {
+                let base = *obj.get_data(&base_value).borrow().unwrap().downcast_ref::<i32>().unwrap();
+                obj.set_data(base_value.clone(), Box::new(base + 1));
+            })))
+        };
         let obj = obj_type.create(&fw);
         let value = *obj.get_data(&base_value).borrow().unwrap().downcast_ref::<i32>().unwrap();
         assert_eq!(19 as i32, value);
