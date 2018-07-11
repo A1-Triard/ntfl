@@ -446,6 +446,13 @@ impl<I> Obj<I> {
     pub fn is(&self, type_: &Type<I>, fw: &Fw<I>) -> bool {
         self.type_().is(type_, fw)
     }
+    pub fn dep(&self) -> &Arc<DepObj<I>> {
+        if let Obj::Dep(ref d) = self {
+            d
+        } else {
+            panic!("Not a dependency object.");
+        }
+    }
 }
 
 struct OccupiedDepPropClassRef<'a, I: 'static> {

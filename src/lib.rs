@@ -20,7 +20,7 @@ use either::{ Left, Right };
 use ncurses::NCurses;
 use scr::{ Scr, Key };
 use fw::{ ValType, ValTypeDesc, Fw, Val, DepType, Type, DepProp, Obj, ClassSetLock, DepObj, DepObjDataKey };
-use window::{ Rect, WindowsHost };
+use window::{ Rect, WindowsHost, Window };
 
 struct StrTypeDesc { }
 impl<I> ValTypeDesc<I> for StrTypeDesc {
@@ -116,17 +116,33 @@ impl<I : 'static> Ntfl<I> {
         };
         let visual_bounds_prop = fw.reg_dep_prop(visual_type, String::from("Bounds"), Type::Val(rect_type), Obj::Val(rect_type.box_(Rect::empty())), None);
         let visual_parent_prop = fw.reg_dep_prop(visual_type, String::from("Parent"), Type::Opt(Box::new(Type::Dep(visual_type))), Obj::Nil(Type::Dep(visual_type)), None);
-        let root_type = fw.reg_dep_type(String::from("Root"), Some(visual_type), None);
+        let root_type = {
+            let visual_window = visual_window.clone();
+            fw.reg_dep_type(String::from("Root"), Some(visual_type), Some(Box::new(move |obj, _fw| {
+                let window = obj.get_data(&visual_window);
+                let mut window = window.borrow().unwrap().downcast_ref::<Mutex<Window>>().unwrap().lock().unwrap();
+                window.attach();
+            })))
+        };
+        fw.lock_class_set(root_type, visual_parent_prop);
         let root_visual_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
-        //{
-            //let host = host.clone();
-            //fw.on_changed(visual_type, visual_parent_prop, Box::new(move |d, o, n, fw| {
-                //let mut window = host.lock().unwrap().new_window();
-                ////let ntfl: &Ntfl<I> = &**a.downcast_ref::<*const Ntfl<I>>().unwrap();
-                //////ntfl.
-
-            //}));
-        //}
+        {
+            let visual_window = visual_window.clone();
+            fw.on_changed(visual_type, visual_parent_prop, Box::new(move |obj, _old, new, _fw| {
+                let window = obj.get_data(&visual_window);
+                let mut window = window.borrow().unwrap().downcast_ref::<Mutex<Window>>().unwrap().lock().unwrap();
+                if !window.is_detached() { window.detach(); }
+                match new {
+                    Obj::Nil(_) => { },
+                    Obj::Has(parent) => {
+                        let parent = parent.dep().get_data(&visual_window);
+                        let mut parent = parent.borrow().unwrap().downcast_ref::<Mutex<Window>>().unwrap().lock().unwrap();
+                        window.attach_to(&mut parent);
+                    },
+                    _ => panic!("VISUAL_PARENT")
+                };
+            }));
+        }
         Ntfl {
             str_type: str_type,
             bool_type: bool_type,
@@ -169,11 +185,14 @@ impl<I : 'static> Ntfl<I> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{ Arc, Mutex };
     use fw;
 
     pub struct TestFw(());
     pub type Fw = fw::Fw<TestFw>;
+    //pub type Obj = fw::Obj<TestFw>;
+    pub use fw::Obj::Dep as Obj_Dep;
+    pub use fw::Obj::Has as Obj_Has;
     pub type Ntfl = ::Ntfl<TestFw>;
 
     lazy_static! {
@@ -186,7 +205,10 @@ mod tests {
 
     #[test]
     fn create_visual() {
-        let _v = NTFL.1.visual_type().create(&NTFL.0.lock().unwrap());
+        let fw = &NTFL.0.lock().unwrap();
+        let r = NTFL.1.root_type().create(fw);
+        let v = NTFL.1.visual_type().create(fw);
+        v.set(NTFL.1.visual_parent_prop(), Obj_Has(Arc::new(Obj_Dep(r))), fw).unwrap();
     }
 }
 
