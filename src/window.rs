@@ -294,13 +294,16 @@ impl Window {
         }
         if self.data.borrow_mut().parent.is_none() { return false; }
         self.set_bounds(Rect::empty());
-        let data = self.data.borrow_mut();
-        let parent = data.parent.as_ref().unwrap();
-        if let Some(ref parent) = parent {
-            del_window(&mut parent.borrow_mut().subwindows, &self.data);
-        } else {
-            del_window(&mut self.host.borrow_mut().windows, &self.data);
+        let mut data = self.data.borrow_mut();
+        {
+            let parent = data.parent.as_ref().unwrap();
+            if let Some(ref parent) = parent {
+                del_window(&mut parent.borrow_mut().subwindows, &self.data);
+            } else {
+                del_window(&mut self.host.borrow_mut().windows, &self.data);
+            }
         }
+        data.parent = None;
         true
     }
     pub fn is_detached(&self) -> bool { self.data.borrow().is_detached() }
@@ -560,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_hierarhy() {
+    fn windows_hierarchy() {
         let mut scr = TestScr::new(4, 4);
         let mut host = WindowsHost::new();
         let mut window1 = host.new_window();
@@ -578,6 +581,7 @@ mod tests {
         let mut sub3 = host.new_window();
         sub3.attach_to(&mut window2);
         sub3.set_bounds(Rect::tlhw(0, 1, 3, 2));
+        sub3.out(0, 0, Texel { ch: 'y', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Blue) });
         let mut subsub = host.new_window();
         subsub.attach_to(&mut sub2);
         subsub.set_bounds(Rect::tlhw(1, 1, 1, 1));
@@ -585,5 +589,39 @@ mod tests {
         window1.out(0, 1, Texel { ch: 'b', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) });
         sub2.out(0, 0, Texel { ch: 'D', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
         host.scr(&mut scr);
+        assert_eq!(Texel { ch: 'a', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) }, scr.content[0 * 4 + 0]);
+        assert_eq!(Texel { ch: 'b', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) }, scr.content[0 * 4 + 1]);
+        assert_eq!(Texel { ch: 'D', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) }, scr.content[0 * 4 + 2]);
+        assert_eq!(Texel { ch: 'y', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Blue) }, scr.content[0 * 4 + 3]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 0]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 1]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 2]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 3]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 0]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 1]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 2]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 3]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 0]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 1]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 2]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 3]);
+        sub3.detach();
+        host.scr(&mut scr);
+        assert_eq!(Texel { ch: 'a', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) }, scr.content[0 * 4 + 0]);
+        assert_eq!(Texel { ch: 'b', attr: Attr::NORMAL, fg: Color::Red, bg: Some(Color::Black) }, scr.content[0 * 4 + 1]);
+        assert_eq!(Texel { ch: 'D', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) }, scr.content[0 * 4 + 2]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[0 * 4 + 3]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 0]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 1]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 2]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[1 * 4 + 3]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 0]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 1]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 2]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[2 * 4 + 3]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 0]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 1]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 2]);
+        assert_eq!(Texel { ch: 'X', attr: Attr::BOLD, fg: Color::Red, bg: None }, scr.content[3 * 4 + 3]);
     }
 }
