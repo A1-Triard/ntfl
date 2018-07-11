@@ -1,10 +1,10 @@
 #![deny(warnings)]
 
-use std::cell::{ Ref, RefCell };
 use std::cmp::{ min, max };
 use std::mem::replace;
 use std::ops::DerefMut;
-use std::rc::Rc;
+use std::sync::{ Arc, Mutex };
+use owning_ref::MutexGuardRef;
 
 use scr::{ Attr, Color, Scr, Texel };
 
@@ -136,12 +136,12 @@ impl Rect {
     }
 }
 
-struct WindowData {
+pub struct WindowData {
     bounds: Rect,
     content: Vec<Vec<Texel>>,
     invalid: Rect,
-    parent: Option<Option<Rc<RefCell<WindowData>>>>,
-    subwindows: Vec<Rc<RefCell<WindowData>>>,
+    parent: Option<Option<Arc<Mutex<WindowData>>>>,
+    subwindows: Vec<Arc<Mutex<WindowData>>>,
 }
 
 impl WindowData {
@@ -158,7 +158,7 @@ impl WindowData {
         match self.parent {
             None => true,
             Some(None) => false,
-            Some(Some(ref p)) => p.borrow().is_detached(),
+            Some(Some(ref p)) => p.lock().unwrap().is_detached(),
         }
     }
     fn set_bounds(&mut self, bounds: Rect) -> Rect {
@@ -206,25 +206,25 @@ impl WindowData {
 }
 
 pub struct Window {
-    host: Rc<RefCell<WindowsHostValue>>,
-    data: Rc<RefCell<WindowData>>,
+    host: Arc<Mutex<WindowsHostValue>>,
+    data: Arc<Mutex<WindowData>>,
 }
 
 struct WindowsHostValue {
-    windows: Vec<Rc<RefCell<WindowData>>>,
+    windows: Vec<Arc<Mutex<WindowData>>>,
     invalid: Rect,
 }
 
 pub struct WindowsHost {
-    val: Rc<RefCell<WindowsHostValue>>,
+    val: Arc<Mutex<WindowsHostValue>>,
 }
 
 impl WindowsHost {
     pub fn new() -> WindowsHost {
-        WindowsHost { val: Rc::new(RefCell::new(WindowsHostValue { windows: Vec::new(), invalid: Rect::empty() })) }
+        WindowsHost { val: Arc::new(Mutex::new(WindowsHostValue { windows: Vec::new(), invalid: Rect::empty() })) }
     }
     pub fn new_window(&mut self) -> Window {
-        Window { host: Rc::clone(&self.val), data: Rc::new(RefCell::new(WindowData::new())) }
+        Window { host: Arc::clone(&self.val), data: Arc::new(Mutex::new(WindowData::new())) }
     }
     pub fn scr(&mut self, s: &mut Scr) {
         fn scr_window(window: &mut WindowData, s: &mut Scr, parent_y: isize, parent_x: isize, crop_height: isize, crop_width: isize, invalid: &mut Rect) {
@@ -232,94 +232,94 @@ impl WindowsHost {
             if let Some((y, x)) = viewport.loc() {
                 let (height, width) = viewport.size();
                 for subwindow in window.subwindows.iter_mut() {
-                    scr_window(subwindow.borrow_mut().deref_mut(), s, y, x, height, width, invalid);
+                    scr_window(subwindow.lock().unwrap().deref_mut(), s, y, x, height, width, invalid);
                 }
             }
         }
-        let mut ref_mut = self.val.borrow_mut();
+        let mut ref_mut = self.val.lock().unwrap();
         let ref mut b = ref_mut.deref_mut();
         let mut invalid = replace(&mut b.invalid, Rect::empty());
         let height = s.get_height().unwrap();
         let width = s.get_width().unwrap();
         for w in b.windows.iter_mut() {
-            scr_window(&mut w.borrow_mut(), s, 0, 0, height, width, &mut invalid);
+            scr_window(&mut w.lock().unwrap(), s, 0, 0, height, width, &mut invalid);
         }
     }
 }
 
 impl Window {
     pub fn out(&mut self, y: isize, x: isize, c: Texel) {
-        self.data.borrow_mut().out(y, x, c);
+        self.data.lock().unwrap().out(y, x, c);
     }
-    pub fn bounds(&self) -> Ref<Rect> {
-        Ref::map(self.data.borrow(), |data| &data.bounds)
+    pub fn bounds(&self) -> MutexGuardRef<WindowData, Rect> {
+        MutexGuardRef::new(self.data.lock().unwrap()).map(|data| &data.bounds)
     }
     pub fn area(&self) -> Rect {
-        let (height, width) = self.data.borrow().bounds.size();
+        let (height, width) = self.data.lock().unwrap().bounds.size();
         Rect::tlhw(0, 0, height, width)
     }
     pub fn set_bounds(&mut self, bounds: Rect) {
         fn global(window: &WindowData, child_y: isize, child_x: isize) -> Option<(isize, isize)> {
             window.bounds.loc()
                 .map(|(y, x)| (y + child_y, x + child_x))
-                .and_then(|(y, x)| window.parent.as_ref().unwrap().as_ref().map_or(Some((y, x)), |parent| global(&parent.borrow(), y, x)))
+                .and_then(|(y, x)| window.parent.as_ref().unwrap().as_ref().map_or(Some((y, x)), |parent| global(&parent.lock().unwrap(), y, x)))
         }
         let mut new_bounds = bounds.clone();
-        let mut old_bounds = self.data.borrow_mut().set_bounds(bounds);
-        if let Some((parent_y, parent_x)) = self.data.borrow().parent.as_ref().unwrap().as_ref().map_or(Some((0, 0)), |parent| global(&parent.borrow(), 0, 0)) {
+        let mut old_bounds = self.data.lock().unwrap().set_bounds(bounds);
+        if let Some((parent_y, parent_x)) = self.data.lock().unwrap().parent.as_ref().unwrap().as_ref().map_or(Some((0, 0)), |parent| global(&parent.lock().unwrap(), 0, 0)) {
             old_bounds.offset(parent_y, parent_x);
             new_bounds.offset(parent_y, parent_x);
-            self.host.borrow_mut().invalid.union(old_bounds);
-            self.host.borrow_mut().invalid.union(new_bounds);
+            self.host.lock().unwrap().invalid.union(old_bounds);
+            self.host.lock().unwrap().invalid.union(new_bounds);
         }
     }
     pub fn attach(&mut self) {
-        if self.data.borrow().parent.is_some() { panic!("Window is attached already.") }
-        self.host.borrow_mut().windows.push(Rc::clone(&self.data));
-        replace(&mut self.data.borrow_mut().parent, Some(None));
+        if self.data.lock().unwrap().parent.is_some() { panic!("Window is attached already.") }
+        self.host.lock().unwrap().windows.push(Arc::clone(&self.data));
+        replace(&mut self.data.lock().unwrap().parent, Some(None));
     }
     pub fn attach_to(&mut self, parent: &mut Window) {
-        if !Rc::ptr_eq(&self.host, &parent.host) { panic!("Foreign window.") }
-        if self.data.borrow().parent.is_some() { panic!("Window is attached already.") }
-        parent.data.borrow_mut().subwindows.push(Rc::clone(&self.data));
-        replace(&mut self.data.borrow_mut().parent, Some(Some(Rc::clone(&parent.data))));
+        if !Arc::ptr_eq(&self.host, &parent.host) { panic!("Foreign window.") }
+        if self.data.lock().unwrap().parent.is_some() { panic!("Window is attached already.") }
+        parent.data.lock().unwrap().subwindows.push(Arc::clone(&self.data));
+        replace(&mut self.data.lock().unwrap().parent, Some(Some(Arc::clone(&parent.data))));
     }
     pub fn detach(&mut self) {
         if !self.detach_core() { panic!("Window is detached already.") }
     }
     fn detach_core(&mut self) -> bool {
-        fn del_window(windows: &mut Vec<Rc<RefCell<WindowData>>>, window: &Rc<RefCell<WindowData>>) {
-            let i = windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0;
+        fn del_window(windows: &mut Vec<Arc<Mutex<WindowData>>>, window: &Arc<Mutex<WindowData>>) {
+            let i = windows.iter().enumerate().filter(|(_, w)| { Arc::ptr_eq(w, window) }).next().unwrap().0;
             windows.remove(i);
         }
-        if self.data.borrow_mut().parent.is_none() { return false; }
+        if self.data.lock().unwrap().parent.is_none() { return false; }
         self.set_bounds(Rect::empty());
-        let mut data = self.data.borrow_mut();
+        let mut data = self.data.lock().unwrap();
         {
             let parent = data.parent.as_ref().unwrap();
             if let Some(ref parent) = parent {
-                del_window(&mut parent.borrow_mut().subwindows, &self.data);
+                del_window(&mut parent.lock().unwrap().subwindows, &self.data);
             } else {
-                del_window(&mut self.host.borrow_mut().windows, &self.data);
+                del_window(&mut self.host.lock().unwrap().windows, &self.data);
             }
         }
         data.parent = None;
         true
     }
-    pub fn is_detached(&self) -> bool { self.data.borrow().is_detached() }
+    pub fn is_detached(&self) -> bool { self.data.lock().unwrap().is_detached() }
     pub fn z_index(&self) -> usize {
-        fn index(windows: &Vec<Rc<RefCell<WindowData>>>, window: &Rc<RefCell<WindowData>>) -> usize {
-            windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0
+        fn index(windows: &Vec<Arc<Mutex<WindowData>>>, window: &Arc<Mutex<WindowData>>) -> usize {
+            windows.iter().enumerate().filter(|(_, w)| { Arc::ptr_eq(w, window) }).next().unwrap().0
         }
-        if let Some(ref parent) = self.data.borrow().parent.as_ref().unwrap() {
-            index(&parent.borrow().subwindows, &self.data)
+        if let Some(ref parent) = self.data.lock().unwrap().parent.as_ref().unwrap() {
+            index(&parent.lock().unwrap().subwindows, &self.data)
         } else {
-            index(&self.host.borrow().windows, &self.data)
+            index(&self.host.lock().unwrap().windows, &self.data)
         }
     }
     pub fn set_z_index(&mut self, index: usize) {
-        fn set_index(windows: &mut Vec<Rc<RefCell<WindowData>>>, window: &Rc<RefCell<WindowData>>, index: usize) {
-             let old = windows.iter().enumerate().filter(|(_, w)| { Rc::ptr_eq(w, window) }).next().unwrap().0;
+        fn set_index(windows: &mut Vec<Arc<Mutex<WindowData>>>, window: &Arc<Mutex<WindowData>>, index: usize) {
+             let old = windows.iter().enumerate().filter(|(_, w)| { Arc::ptr_eq(w, window) }).next().unwrap().0;
              let window = windows.remove(old);
              let index = min(index, windows.len());
              windows.insert(index, window);
@@ -327,17 +327,17 @@ impl Window {
         fn global(window: &WindowData, child_y: isize, child_x: isize) -> Option<(isize, isize)> {
             window.bounds.loc()
                 .map(|(y, x)| (y + child_y, x + child_x))
-                .and_then(|(y, x)| window.parent.as_ref().unwrap().as_ref().map_or(Some((y, x)), |parent| global(&parent.borrow(), y, x)))
+                .and_then(|(y, x)| window.parent.as_ref().unwrap().as_ref().map_or(Some((y, x)), |parent| global(&parent.lock().unwrap(), y, x)))
         }
-        let mut bounds = self.data.borrow().bounds.clone();
-        if let Some((parent_y, parent_x)) = self.data.borrow().parent.as_ref().unwrap().as_ref().map_or(Some((0, 0)), |parent| global(&parent.borrow(), 0, 0)) {
+        let mut bounds = self.data.lock().unwrap().bounds.clone();
+        if let Some((parent_y, parent_x)) = self.data.lock().unwrap().parent.as_ref().unwrap().as_ref().map_or(Some((0, 0)), |parent| global(&parent.lock().unwrap(), 0, 0)) {
             bounds.offset(parent_y, parent_x);
-            self.host.borrow_mut().invalid.union(bounds);
+            self.host.lock().unwrap().invalid.union(bounds);
         }
-        if let Some(ref parent) = self.data.borrow().parent.as_ref().unwrap() {
-            set_index(&mut parent.borrow_mut().subwindows, &self.data, index)
+        if let Some(ref parent) = self.data.lock().unwrap().parent.as_ref().unwrap() {
+            set_index(&mut parent.lock().unwrap().subwindows, &self.data, index)
         } else {
-            set_index(&mut self.host.borrow_mut().windows, &self.data, index)
+            set_index(&mut self.host.lock().unwrap().windows, &self.data, index)
         }
     }
 }
@@ -350,7 +350,7 @@ impl Drop for Window {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
     use window::Rect;
     use window::Window;
     use window::WindowData;
@@ -397,12 +397,12 @@ mod tests {
         let mut host = WindowsHost::new();
         let window_ref = {
             let mut window = host.new_window();
-            let window_ref = Rc::downgrade(&window.data);
+            let window_ref = Arc::downgrade(&window.data);
             assert!(window_ref.upgrade().is_some());
             window_ref
         };
         if let Some(window) = window_ref.upgrade() {
-            panic!(format!("{}", Rc::strong_count(&window)));
+            panic!(format!("{}", Arc::strong_count(&window)));
         }
     }
 
@@ -438,7 +438,7 @@ mod tests {
         let mut sub = host.new_window();
         sub.attach_to(&mut window);
         sub.set_bounds(Rect::tlhw(1, 1, 1, 1));
-        assert_eq!(Rect::empty(), host.val.borrow().invalid);
+        assert_eq!(Rect::empty(), host.val.lock().unwrap().invalid);
     }
 
     #[test]
@@ -465,16 +465,16 @@ mod tests {
             sub.attach_to(&mut window);
             sub.set_bounds(Rect::tlhw(10, 20, 10, 15));
             host.scr(&mut s);
-            assert_eq!(Rect::empty(), sub.data.borrow().invalid);
+            assert_eq!(Rect::empty(), sub.data.lock().unwrap().invalid);
             sub.out(0, 0, Texel { ch: '+', attr: Attr::NORMAL, fg: Color::Green, bg: Some(Color::Black) });
-            assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
+            assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.lock().unwrap().invalid);
             sub.set_bounds(Rect::tlhw(10, 20, 9, 14));
-            assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.borrow().invalid);
-            assert_eq!(Rect::tlhw(0, 0, 10, 15), host.val.borrow().invalid);
+            assert_eq!(Rect::tlhw(0, 0, 1, 1), sub.data.lock().unwrap().invalid);
+            assert_eq!(Rect::tlhw(0, 0, 10, 15), host.val.lock().unwrap().invalid);
             host.scr(&mut s);
-            assert_eq!(Rect::empty(), host.val.borrow().invalid);
+            assert_eq!(Rect::empty(), host.val.lock().unwrap().invalid);
         }
-        assert_eq!(Rect::tlhw(0, 0, 9, 14), host.val.borrow().invalid);
+        assert_eq!(Rect::tlhw(0, 0, 9, 14), host.val.lock().unwrap().invalid);
     }
 
     #[test]
