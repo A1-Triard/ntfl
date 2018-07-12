@@ -5,6 +5,7 @@ extern crate either;
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
+extern crate libc_extra;
 extern crate owning_ref;
 
 pub mod scr;
@@ -98,9 +99,10 @@ pub struct Ntfl<I> {
     visual_parent_prop: DepProp<I>,
     root_type: DepType<I>,
     root_bounds_lock: ClassSetLock,
+    host: Arc<Mutex<WindowsHost>>,
 }
 
-impl<I : 'static> Ntfl<I> {
+impl<I : 'static + Send> Ntfl<I> {
     pub fn new(fw: &mut Fw<I>) -> Ntfl<I> {
         let host = Arc::new(Mutex::new(WindowsHost::new()));
         let str_type = fw.reg_val_type(Box::new(StrTypeDesc { }));
@@ -128,7 +130,16 @@ impl<I : 'static> Ntfl<I> {
         let root_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
         {
             let visual_window = visual_window.clone();
-            fw.on_changed(visual_type, visual_parent_prop, Box::new(move |obj, _old, new, _fw| {
+            fw.on_changed(visual_type, visual_bounds_prop, Box::new(move |obj, _old, new, _fw| {
+                let window = obj.get_data(&visual_window);
+                let mut window = window.borrow().unwrap().downcast_ref::<Mutex<Window>>().unwrap().lock().unwrap();
+                if window.is_detached() { return; }
+                window.set_bounds(new.unbox::<Rect>().clone());
+            }));
+        }
+        {
+            let visual_window = visual_window.clone();
+            fw.on_changed(visual_type, visual_parent_prop, Box::new(move |obj, _old, new, fw| {
                 let window = obj.get_data(&visual_window);
                 let mut window = window.borrow().unwrap().downcast_ref::<Mutex<Window>>().unwrap().lock().unwrap();
                 if !window.is_detached() { window.detach(); }
@@ -138,6 +149,7 @@ impl<I : 'static> Ntfl<I> {
                         let parent = parent.dep().get_data(&visual_window);
                         let mut parent = parent.borrow().unwrap().downcast_ref::<Mutex<Window>>().unwrap().lock().unwrap();
                         window.attach_to(&mut parent);
+                        window.set_bounds(obj.get(visual_bounds_prop, fw).unbox::<Rect>().clone());
                     },
                     _ => panic!("VISUAL_PARENT")
                 };
@@ -152,6 +164,7 @@ impl<I : 'static> Ntfl<I> {
             visual_parent_prop: visual_parent_prop,
             root_type: root_type,
             root_bounds_lock: root_bounds_lock,
+            host: host,
         }
     }
     pub fn run(&self, root: &DepObj<I>, fw: &Fw<I>) {
@@ -163,6 +176,7 @@ impl<I : 'static> Ntfl<I> {
         };
         update_root_bounds(&scr);
         loop {
+            self.host.lock().unwrap().scr(&mut scr);
             match scr.getch().unwrap() {
                 Left(Key::RESIZE) => {
                     update_root_bounds(&scr);
@@ -208,7 +222,8 @@ mod tests {
         let fw = &NTFL.0.lock().unwrap();
         let r = NTFL.1.root_type().create(fw);
         let v = NTFL.1.visual_type().create(fw);
-        v.set(NTFL.1.visual_parent_prop(), Obj_Has(Arc::new(Obj_Dep(r))), fw).unwrap();
+        v.set(NTFL.1.visual_parent_prop(), Obj_Has(Arc::new(Obj_Dep(r.clone()))), fw).unwrap();
+        NTFL.1.run(&r, fw);
     }
 }
 

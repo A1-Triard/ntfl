@@ -4,7 +4,8 @@ use std::marker::Sized;
 use std::os::raw::{ c_int, c_void, c_short, c_char, c_uint };
 use std::ptr::null;
 use either::{ Either, Left, Right };
-use libc::{ setlocale, LC_ALL };
+use libc::{ setlocale, LC_ALL, FILE };
+use libc_extra::unix::stdio::{ stdout, stdin };
 
 use scr::{ Color, Scr, Texel, Key };
 
@@ -14,10 +15,14 @@ include!(concat!(env!("OUT_DIR"), "/attr_t.rs"));
 include!(concat!(env!("OUT_DIR"), "/KEY_CODE_YES.rs"));
 
 type WINDOW = c_void;
+type SCREEN = c_void;
 
 extern "C" {
-    fn initscr() -> *mut WINDOW;
+    #[no_mangle]
+    static stdscr: *mut WINDOW;
+    fn newterm(type_: *mut c_char, outfd: *mut FILE, infd: *mut FILE) -> *mut SCREEN;
     fn endwin() -> c_int;
+    fn delscreen(sp: *mut SCREEN);
     fn noecho() -> c_int;
     fn wrefresh(w: *mut WINDOW) -> c_int;
     fn wmove(w: *mut WINDOW, y: c_int, x: c_int) -> c_int;
@@ -54,14 +59,16 @@ impl Checkable for c_int {
 }
 
 pub struct NCurses {
-    ptr: *mut WINDOW,
+    screen: *mut SCREEN,
+    stdscr: *mut WINDOW,
     cursor_is_visible: bool,
 }
 
 impl NCurses {
     pub fn new() -> Result<NCurses, ()> {
         unsafe { setlocale(LC_ALL, "\0".as_ptr() as *const c_char) };
-        let p = unsafe { initscr() }.check()?;
+        let screen = unsafe { newterm(null::<c_char>() as *mut c_char, stdout as *mut FILE, stdin as *mut FILE) }.check()?;
+        let stdscr_ = unsafe { stdscr }.check()?;
         unsafe { start_color() }.check()?;
         for bg in -1 .. 8 {
         for fg in 0 .. 8 {
@@ -73,15 +80,15 @@ impl NCurses {
         }
         }
         unsafe { noecho() }.check()?;
-        unsafe { keypad(p, 1) }.check()?;
+        unsafe { keypad(stdscr_, 1) }.check()?;
         unsafe { curs_set(0) };
-        Ok(NCurses { ptr: p, cursor_is_visible: false })
+        Ok(NCurses { screen: screen, stdscr: stdscr_, cursor_is_visible: false })
     }
     fn get_width_i(&self) -> Result<c_int, ()> {
-        unsafe { getmaxx(self.ptr) }.check()
+        unsafe { getmaxx(self.stdscr) }.check()
     }
     fn get_height_i(&self) -> Result<c_int, ()> {
-        unsafe { getmaxy(self.ptr) }.check()
+        unsafe { getmaxy(self.stdscr) }.check()
     }
 }
 
@@ -105,12 +112,12 @@ impl Scr for NCurses {
 
         let y = y as c_int;
         let x = x as c_int;
-        unsafe { wmove(self.ptr, y, x) }.check()?;
-        unsafe { wattr_set(self.ptr, (c.attr.bits() as attr_t) << 16, color_pair(c.fg, c.bg), null()) }.check()?;
+        unsafe { wmove(self.stdscr, y, x) }.check()?;
+        unsafe { wattr_set(self.stdscr, (c.attr.bits() as attr_t) << 16, color_pair(c.fg, c.bg), null()) }.check()?;
         let outstr = if x + 1 < self.get_width_i()? { waddnstr } else { winsnstr };
         let mut b = [0; 6];
         let b = c.ch.encode_utf8(&mut b);
-        unsafe { outstr(self.ptr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
+        unsafe { outstr(self.stdscr, b.as_bytes().as_ptr() as *const c_char, b.len() as c_int) }.check()?;
         Ok(())
     }
     fn refresh(&mut self, cursor: Option<(isize, isize)>) -> Result<(), ()> {
@@ -128,10 +135,10 @@ impl Scr for NCurses {
                     unsafe { curs_set(1); }
                     self.cursor_is_visible = true;
                 }
-                unsafe { wmove(self.ptr, y, x) }.check()?;
+                unsafe { wmove(self.stdscr, y, x) }.check()?;
             }
         }
-        unsafe { wrefresh(self.ptr) }.check()?;
+        unsafe { wrefresh(self.stdscr) }.check()?;
         Ok(())
     }
     fn getch(&mut self) -> Result<Either<Key, char>, ()> {
@@ -156,12 +163,12 @@ impl Scr for NCurses {
             Err(())
         }
 
-        let b0 = unsafe { wgetch(self.ptr) }.check()? as c_uint;
+        let b0 = unsafe { wgetch(self.stdscr) }.check()? as c_uint;
         if b0 & KEY_CODE_YES != 0 {
             return Ok(Left(Key { value: b0 as u32 }));
         }
         let c = read_u8_tail(b0 as u8, &|| {
-            let bi = unsafe { wgetch(self.ptr) }.check()? as c_uint;
+            let bi = unsafe { wgetch(self.stdscr) }.check()? as c_uint;
             if bi & KEY_CODE_YES != 0 { return Err(()); }
             Ok(bi as u8)
         })?;
@@ -175,5 +182,6 @@ impl Scr for NCurses {
 impl Drop for NCurses {
     fn drop(&mut self) {
         unsafe { endwin(); }
+        unsafe { delscreen(self.screen); }
     }
 }
