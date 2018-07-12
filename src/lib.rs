@@ -97,7 +97,7 @@ pub struct Ntfl<I> {
     visual_bounds_prop: DepProp<I>,
     visual_parent_prop: DepProp<I>,
     root_type: DepType<I>,
-    root_visual_bounds_lock: ClassSetLock,
+    root_bounds_lock: ClassSetLock,
 }
 
 impl<I : 'static> Ntfl<I> {
@@ -125,7 +125,7 @@ impl<I : 'static> Ntfl<I> {
             })))
         };
         fw.lock_class_set(root_type, visual_parent_prop);
-        let root_visual_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
+        let root_bounds_lock = fw.lock_class_set(root_type, visual_bounds_prop);
         {
             let visual_window = visual_window.clone();
             fw.on_changed(visual_type, visual_parent_prop, Box::new(move |obj, _old, new, _fw| {
@@ -151,7 +151,7 @@ impl<I : 'static> Ntfl<I> {
             visual_bounds_prop: visual_bounds_prop,
             visual_parent_prop: visual_parent_prop,
             root_type: root_type,
-            root_visual_bounds_lock: root_visual_bounds_lock,
+            root_bounds_lock: root_bounds_lock,
         }
     }
     pub fn run(&self, root: &DepObj<I>, fw: &Fw<I>) {
@@ -159,7 +159,7 @@ impl<I : 'static> Ntfl<I> {
         let update_root_bounds = |scr: &Scr| {
             let height = scr.get_height().unwrap();
             let width = scr.get_width().unwrap();
-            root.set_locked(self.visual_bounds_prop, Obj::Val(self.rect_type.box_(Rect::tlhw(0, 0, height, width))), &self.root_visual_bounds_lock, fw);
+            root.set_locked(self.visual_bounds_prop, Obj::Val(self.rect_type.box_(Rect::tlhw(0, 0, height, width))), &self.root_bounds_lock, fw);
         };
         update_root_bounds(&scr);
         loop {
