@@ -13,7 +13,7 @@ use std::ops::{ Deref, DerefMut };
 use std::sync::{ Arc, Mutex, MutexGuard };
 use either::{ Either, Left, Right };
 
-pub trait ValTypeDesc<I> : Send {
+pub trait ValTypeDesc<I : Send + Sync> : Send {
     fn name(&self) -> &str;
     fn parse(&self, type_: ValType<I>, s: &str) -> Option<Arc<Val<I>>>;
     fn to_string(&self, val: &Val<I>) -> String;
@@ -35,7 +35,7 @@ impl<I> Ord for ValType<I> { fn cmp(&self, other: &ValType<I>) -> Ordering { sel
 impl<I> PartialOrd for ValType<I> { fn partial_cmp(&self, other: &ValType<I>) -> Option<Ordering> { Some(self.cmp(other)) } }
 impl<I> Hash for ValType<I> { fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); } }
 
-impl<I> ValType<I> {
+impl<I : Send + Sync> ValType<I> {
     pub fn box_<T: 'static + Any + Send + Sync>(&self, val: T) -> Arc<Val<I>> { Arc::new(Val(ValI { type_: self.0, unbox: Box::new(val) }, PhantomData)) }
     pub fn name(self, fw: &Fw<I>) -> &str {
         fw.val_types[self.0.index].name()
@@ -50,9 +50,9 @@ struct ValI {
     unbox: Box<Any + Send + Sync>,
 }
 
-pub struct Val<I>(ValI, PhantomData<I>);
+pub struct Val<I : Send + Sync>(ValI, PhantomData<I>);
 
-impl<I> Val<I> {
+impl<I : Send + Sync> Val<I> {
     pub fn type_(&self) -> ValType<I> { ValType(self.0.type_, PhantomData) }
     pub fn unbox<T: 'static>(&self) -> &T { <Any>::downcast_ref(&*self.0.unbox).unwrap() }
     pub fn to_string(&self, fw: &Fw<I>) -> String {
@@ -60,19 +60,19 @@ impl<I> Val<I> {
     }
 }
 
-struct DepPropClass<I> {
+struct DepPropClass<I : Send + Sync> {
     def_val: Option<Obj<I>>,
     set_lock: Option<ClassSetLock>,
-    on_changed: Vec<Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Fw<I>) + Send>>,
+    on_changed: Vec<Box<Fn(&DepObj<I>, &Obj<I>, &Fw<I>) + Send>>,
 }
 
-struct DepTypeDesc<I> {
+struct DepTypeDesc<I : Send + Sync> {
     base: Option<DepType<I>>,
     name: String,
     props: Vec<DepPropDesc<I>>,
     props_by_name: HashMap<String, DepProp<I>>,
     prop_class: HashMap<DepProp<I>, DepPropClass<I>>,
-    ctor: Option<Box<Fn(&Arc<DepObj<I>>, &Fw<I>) + Send>>,
+    ctor: Option<Box<Fn(&DepObj<I>, &Fw<I>) + Send>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -80,30 +80,30 @@ struct DepTypeI {
     index: usize
 }
 
-pub struct DepType<I>(DepTypeI, PhantomData<I>);
+pub struct DepType<I : Send>(DepTypeI, PhantomData<I>);
 
-impl<I> Debug for DepType<I> { fn fmt(&self, f: &mut Formatter) -> fmt::Result { self.0.fmt(f) } }
-impl<I> Copy for DepType<I> { }
-impl<I> Clone for DepType<I> { fn clone(&self) -> Self { DepType(self.0, PhantomData) } }
-impl<I> PartialEq for DepType<I> { fn eq(&self, other: &DepType<I>) -> bool { self.0 == other.0 } }
-impl<I> Eq for DepType<I> { }
-impl<I> Ord for DepType<I> { fn cmp(&self, other: &DepType<I>) -> Ordering { self.0.cmp(&other.0) } }
-impl<I> PartialOrd for DepType<I> { fn partial_cmp(&self, other: &DepType<I>) -> Option<Ordering> { Some(self.cmp(other)) } }
-impl<I> Hash for DepType<I> { fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); } }
+impl<I : Send> Debug for DepType<I> { fn fmt(&self, f: &mut Formatter) -> fmt::Result { self.0.fmt(f) } }
+impl<I : Send> Copy for DepType<I> { }
+impl<I : Send> Clone for DepType<I> { fn clone(&self) -> Self { DepType(self.0, PhantomData) } }
+impl<I : Send> PartialEq for DepType<I> { fn eq(&self, other: &DepType<I>) -> bool { self.0 == other.0 } }
+impl<I : Send> Eq for DepType<I> { }
+impl<I : Send> Ord for DepType<I> { fn cmp(&self, other: &DepType<I>) -> Ordering { self.0.cmp(&other.0) } }
+impl<I : Send> PartialOrd for DepType<I> { fn partial_cmp(&self, other: &DepType<I>) -> Option<Ordering> { Some(self.cmp(other)) } }
+impl<I : Send> Hash for DepType<I> { fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); } }
 
-fn assert_dep_prop_target<I>(dep_prop: DepProp<I>, dep_type: DepType<I>, fw: &Fw<I>) {
+fn assert_dep_prop_target<I : Send + Sync>(dep_prop: DepProp<I>, dep_type: DepType<I>, fw: &Fw<I>) {
     if !dep_type.is(dep_prop.target(fw), fw) {
         panic!("Dependency property target type mismatch.");
     }
 }
 
-fn assert_dep_prop_val<I>(dep_prop: DepProp<I>, val_type: Type<I>, fw: &Fw<I>) {
+fn assert_dep_prop_val<I : Send + Sync>(dep_prop: DepProp<I>, val_type: Type<I>, fw: &Fw<I>) {
     if !val_type.is(dep_prop.val_type(fw), fw) {
         panic!("Dependency property value type mismatch.");
     }
 }
 
-impl<I> DepType<I> {
+impl<I : Send + Sync> DepType<I> {
     pub fn name(self, fw: &Fw<I>) -> &str {
         &fw.dep_types[self.0.index].name
     }
@@ -112,7 +112,7 @@ impl<I> DepType<I> {
     }
     pub fn def_val(self, dep_prop: DepProp<I>, fw: &Fw<I>) -> &Obj<I> {
         assert_dep_prop_target(dep_prop, self, fw);
-        fn self_def_val<I>(dep_type: DepType<I>, fw: &Fw<I>, dep_prop: DepProp<I>) -> Option<&Obj<I>> {
+        fn self_def_val<I : Send + Sync>(dep_type: DepType<I>, fw: &Fw<I>, dep_prop: DepProp<I>) -> Option<&Obj<I>> {
             fw.dep_types[dep_type.0.index].prop_class.get(&dep_prop).and_then(|c| { c.def_val.as_ref() })
         }
         let mut base = self;
@@ -123,7 +123,7 @@ impl<I> DepType<I> {
             if let Some(t) = base.base(fw) { base = t; } else { panic!("DEF_VAL_NOT_FOUND"); }
         }
     }
-    fn init(self, obj: &Arc<DepObj<I>>, fw: &Fw<I>) {
+    fn init(self, obj: &DepObj<I>, fw: &Fw<I>) {
         if let Some(base) = self.base(fw) {
             base.init(obj, fw);
         }
@@ -131,8 +131,8 @@ impl<I> DepType<I> {
             ctor(obj, fw);
         }
     }
-    pub fn create(self, fw: &Fw<I>) -> Arc<DepObj<I>> {
-        let obj = Arc::new(DepObj { type_: self, props: Mutex::new(HashMap::new()), data: Mutex::new(HashMap::new()) });
+    pub fn create(self, fw: &Fw<I>) -> DepObj<I> {
+        let obj = DepObj(Arc::new(DepObjInst { type_: self, props: Mutex::new(HashMap::new()), data: Mutex::new(HashMap::new()) }));
         self.init(&obj, fw);
         obj
     }
@@ -146,7 +146,7 @@ impl<I> DepType<I> {
     fn set_lock(self, dep_prop: DepProp<I>, fw: &Fw<I>) -> Option<ClassSetLock> {
         let mut base = self;
         loop {
-            let maybe_lock = fw.dep_types.get(base.0.index).unwrap().prop_class.get(&dep_prop)
+            let maybe_lock = fw.dep_types[base.0.index].prop_class.get(&dep_prop)
                 .and_then(|class| { class.set_lock.clone() });
             if maybe_lock.is_some() { return maybe_lock; }
             if let Some(t) = base.base(fw) { base = t; } else { return None; }
@@ -155,15 +155,25 @@ impl<I> DepType<I> {
     pub fn is_locked(self, dep_prop: DepProp<I>, fw: &Fw<I>) -> bool {
         self.set_lock(dep_prop, fw).is_some()
     }
+    fn on_changed(self, dep_prop: DepProp<I>, dep_obj: &DepObj<I>, old: &Obj<I>, fw: &Fw<I>) {
+        if let Some(base) = self.base(fw) {
+            base.on_changed(dep_prop, dep_obj, old, fw);
+        }
+        if let Some(on_changed) = fw.dep_types[self.0.index].prop_class.get(&dep_prop).as_ref().map(|class| { &class.on_changed }) {
+            for c in on_changed {
+                c(dep_obj, old, fw);
+            }
+        }
+    }
 }
 
-pub enum Type<I> {
+pub enum Type<I : Send> {
     Val(ValType<I>),
     Dep(DepType<I>),
     Opt(Box<Type<I>>),
 }
 
-impl<I> Debug for Type<I> {
+impl<I : Send> Debug for Type<I> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             Type::Val(v) => write!(f, "Val({:?})", v),
@@ -172,7 +182,7 @@ impl<I> Debug for Type<I> {
         }
     }
 }
-impl<I> Clone for Type<I> {
+impl<I : Send> Clone for Type<I> {
     fn clone(&self) -> Self {
         match self {
             Type::Val(v) => Type::Val(v.clone()),
@@ -181,7 +191,7 @@ impl<I> Clone for Type<I> {
         }
     }
 }
-impl<I> PartialEq for Type<I> {
+impl<I : Send> PartialEq for Type<I> {
     fn eq(&self, other: &Type<I>) -> bool {
         match self {
             Type::Val(v) => { if let Type::Val(o_v) = other { *v == *o_v } else { false } },
@@ -190,8 +200,8 @@ impl<I> PartialEq for Type<I> {
         }
     }
 }
-impl<I> Eq for Type<I> { }
-impl<I> Ord for Type<I> {
+impl<I : Send> Eq for Type<I> { }
+impl<I : Send> Ord for Type<I> {
     fn cmp(&self, other: &Type<I>) -> Ordering {
         match self {
             Type::Val(v) => {
@@ -218,8 +228,8 @@ impl<I> Ord for Type<I> {
         }
     }
 }
-impl<I> PartialOrd for Type<I> { fn partial_cmp(&self, other: &Type<I>) -> Option<Ordering> { Some(self.cmp(other)) } }
-impl<I> Hash for Type<I> {
+impl<I : Send> PartialOrd for Type<I> { fn partial_cmp(&self, other: &Type<I>) -> Option<Ordering> { Some(self.cmp(other)) } }
+impl<I : Send> Hash for Type<I> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             Type::Val(v) => { state.write_u8(0); v.hash(state); },
@@ -229,7 +239,7 @@ impl<I> Hash for Type<I> {
     }
 }
 
-impl<I> Type<I> {
+impl<I : Send + Sync> Type<I> {
     pub fn is(&self, type_: &Type<I>, fw: &Fw<I>) -> bool {
         match self {
             Type::Val(v) => { if let Type::Val(o_v) = type_ { v == o_v } else { false } },
@@ -239,7 +249,7 @@ impl<I> Type<I> {
     }
 }
 
-struct DepPropDesc<I> {
+struct DepPropDesc<I : Send> {
     name: String,
     val_type: Type<I>,
     attached: Option<DepType<I>>,
@@ -262,7 +272,7 @@ impl<I> Ord for DepProp<I> { fn cmp(&self, other: &DepProp<I>) -> Ordering { sel
 impl<I> PartialOrd for DepProp<I> { fn partial_cmp(&self, other: &DepProp<I>) -> Option<Ordering> { Some(self.cmp(other)) } }
 impl<I> Hash for DepProp<I> { fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); } }
 
-impl<I> DepProp<I> {
+impl<I : Send + Sync> DepProp<I> {
     pub fn owner(self) -> DepType<I> { DepType(self.0.owner, PhantomData) }
     pub fn name(self, fw: &Fw<I>) -> &str {
         &fw.dep_types[self.0.owner.index].props[self.0.index].name[..]
@@ -278,7 +288,7 @@ impl<I> DepProp<I> {
     }
 }
 
-pub struct Fw<I> {
+pub struct Fw<I : Send + Sync> {
     val_types: Vec<Box<ValTypeDesc<I>>>,
     val_types_by_name: HashMap<String, ValType<I>>,
     dep_types: Vec<DepTypeDesc<I>>,
@@ -305,20 +315,26 @@ impl DepObjDataKey {
     pub fn new() -> DepObjDataKey { DepObjDataKey(Unique::new()) }
 }
 
-pub struct DepObj<I> {
+struct DepObjInst<I : Send + Sync> {
     type_: DepType<I>,
     props: Mutex<HashMap<DepProp<I>, Obj<I>>>,
     data: Mutex<HashMap<DepObjDataKey, Box<Any + Send>>>,
 }
 
-pub struct GetRef<'a, I : 'static> {
+pub struct DepObj<I : Send + Sync>(Arc<DepObjInst<I>>);
+
+impl<I : Send + Sync> Clone for DepObj<I> {
+    fn clone(&self) -> Self { DepObj(self.0.clone()) }
+}
+
+pub struct GetRef<'a, I : 'static + Send + Sync> {
     props: MutexGuard<'a, HashMap<DepProp<I>, Obj<I>>>,
     fw: &'a Fw<I>,
     dep_type: DepType<I>,
     dep_prop: DepProp<I>,
 }
 
-impl<'a, I> Deref for GetRef<'a, I> {
+impl<'a, I : Send + Sync> Deref for GetRef<'a, I> {
     type Target = Obj<I>;
 
     fn deref(&self) -> &Obj<I> {
@@ -328,12 +344,12 @@ impl<'a, I> Deref for GetRef<'a, I> {
     }
 }
 
-pub struct GetNonDefRef<'a, I : 'static> {
+pub struct GetNonDefRef<'a, I : 'static + Send + Sync> {
     props: MutexGuard<'a, HashMap<DepProp<I>, Obj<I>>>,
     dep_prop: DepProp<I>,
 }
 
-impl<'a, I> GetNonDefRef<'a, I> {
+impl<'a, I : Send + Sync> GetNonDefRef<'a, I> {
     pub fn borrow(&self) -> Option<&Obj<I>> {
         self.props.get(&self.dep_prop)
     }
@@ -350,24 +366,24 @@ impl<'a> GetDataRef<'a> {
     }
 }
 
-impl<I> DepObj<I> {
-    pub fn type_(&self) -> DepType<I> { self.type_ }
+impl<I: 'static + Send + Sync> DepObj<I> {
+    pub fn type_(&self) -> DepType<I> { self.0.type_ }
     pub fn get_non_def<'a>(&'a self, dep_prop: DepProp<I>, fw: &Fw<I>) -> GetNonDefRef<'a, I> {
-        assert_dep_prop_target(dep_prop, self.type_, fw);
-        GetNonDefRef { props: self.props.lock().unwrap(), dep_prop: dep_prop }
+        assert_dep_prop_target(dep_prop, self.0.type_, fw);
+        GetNonDefRef { props: self.0.props.lock().unwrap(), dep_prop: dep_prop }
     }
     pub fn get<'a>(&'a self, dep_prop: DepProp<I>, fw: &'a Fw<I>) -> GetRef<'a, I> {
-        assert_dep_prop_target(dep_prop, self.type_, fw);
-        GetRef { props: self.props.lock().unwrap(), fw: fw, dep_prop: dep_prop, dep_type: self.type_ }
+        assert_dep_prop_target(dep_prop, self.0.type_, fw);
+        GetRef { props: self.0.props.lock().unwrap(), fw: fw, dep_prop: dep_prop, dep_type: self.0.type_ }
     }
     pub fn get_data<'a>(&'a self, key: &'a DepObjDataKey) -> GetDataRef<'a> {
-        GetDataRef { data: self.data.lock().unwrap(), key: key }
+        GetDataRef { data: self.0.data.lock().unwrap(), key: key }
     }
     pub fn set_data(&self, key: DepObjDataKey, value: Box<Any + Send>) {
-        self.data.lock().unwrap().insert(key, value);
+        self.0.data.lock().unwrap().insert(key, value);
     }
     pub fn reset_data(&self, key: &DepObjDataKey) {
-        self.data.lock().unwrap().remove(key);
+        self.0.data.lock().unwrap().remove(key);
     }
     pub fn set(&self, dep_prop: DepProp<I>, val: Obj<I>, fw: &Fw<I>) -> Result<(), ()> {
         self.set_core(dep_prop, val, None, fw)
@@ -378,12 +394,14 @@ impl<I> DepObj<I> {
     fn set_core(&self, dep_prop: DepProp<I>, val: Obj<I>, lock: Option<&ClassSetLock>, fw: &Fw<I>) -> Result<(), ()> {
         assert_dep_prop_val(dep_prop, val.type_(), fw);
         self.check_set(dep_prop, lock, fw)?;
-        self.props.lock().unwrap().insert(dep_prop, val);
+        let old = self.get(dep_prop, fw).clone();
+        self.0.props.lock().unwrap().insert(dep_prop, val);
+        self.0.type_.on_changed(dep_prop, self, &old, fw);
         Ok(())
     }
     fn check_set(&self, dep_prop: DepProp<I>, lock: Option<&ClassSetLock>, fw: &Fw<I>) -> Result<(), ()> {
-        assert_dep_prop_target(dep_prop, self.type_, fw);
-        let set_lock = self.type_.set_lock(dep_prop, fw);
+        assert_dep_prop_target(dep_prop, self.0.type_, fw);
+        let set_lock = self.0.type_.set_lock(dep_prop, fw);
         if let Some(set_lock) = set_lock {
             if let Some(lock) = lock {
                 if set_lock != *lock {
@@ -405,22 +423,24 @@ impl<I> DepObj<I> {
     }
     fn reset_core(&self, dep_prop: DepProp<I>, lock: Option<&ClassSetLock>, fw: &Fw<I>) -> Result<(), ()> {
         self.check_set(dep_prop, lock, fw)?;
-        self.props.lock().unwrap().remove(&dep_prop);
+        let old = self.get(dep_prop, fw).clone();
+        self.0.props.lock().unwrap().remove(&dep_prop);
+        self.0.type_.on_changed(dep_prop, self, &old, fw);
         Ok(())
     }
     pub fn is(&self, dep_type: DepType<I>, fw: &Fw<I>) -> bool {
-        self.type_.is(dep_type, fw)
+        self.0.type_.is(dep_type, fw)
     }
 }
 
-pub enum Obj<I> {
+pub enum Obj<I : Send + Sync> {
     Val(Arc<Val<I>>),
-    Dep(Arc<DepObj<I>>),
+    Dep(DepObj<I>),
     Nil(Type<I>),
     Has(Arc<Obj<I>>),
 }
 
-impl<I> Clone for Obj<I> {
+impl<I : Send + Sync> Clone for Obj<I> {
     fn clone(&self) -> Self {
         match self {
             Obj::Val(ref v) => Obj::Val(v.clone()),
@@ -431,7 +451,7 @@ impl<I> Clone for Obj<I> {
     }
 }
 
-impl<I> Obj<I> {
+impl<I : 'static + Send + Sync> Obj<I> {
     pub fn unbox<T: 'static>(&self) -> &T {
         if let Obj::Val(ref v) = self { v.unbox() } else { panic!("Cannot unbox a non-value object."); }
     }
@@ -446,7 +466,7 @@ impl<I> Obj<I> {
     pub fn is(&self, type_: &Type<I>, fw: &Fw<I>) -> bool {
         self.type_().is(type_, fw)
     }
-    pub fn dep(&self) -> &Arc<DepObj<I>> {
+    pub fn dep(&self) -> &DepObj<I> {
         if let Obj::Dep(ref d) = self {
             d
         } else {
@@ -455,11 +475,11 @@ impl<I> Obj<I> {
     }
 }
 
-struct OccupiedDepPropClassRef<'a, I: 'static> {
+struct OccupiedDepPropClassRef<'a, I: 'static + Send + Sync> {
     entry: OccupiedEntry<'a, DepProp<I>, DepPropClass<I>>,
 }
 
-impl<'a, I> Deref for OccupiedDepPropClassRef<'a, I> {
+impl<'a, I : Send + Sync> Deref for OccupiedDepPropClassRef<'a, I> {
     type Target = DepPropClass<I>;
 
     fn deref(&self) -> &DepPropClass<I> {
@@ -467,7 +487,7 @@ impl<'a, I> Deref for OccupiedDepPropClassRef<'a, I> {
     }
 }
 
-impl<'a, I> DerefMut for OccupiedDepPropClassRef<'a, I> {
+impl<'a, I : Send + Sync> DerefMut for OccupiedDepPropClassRef<'a, I> {
     fn deref_mut(&mut self) -> &mut DepPropClass<I> {
         self.entry.get_mut()
     }
@@ -476,7 +496,7 @@ impl<'a, I> DerefMut for OccupiedDepPropClassRef<'a, I> {
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ClassSetLock(Unique);
 
-impl<I: 'static> Fw<I> {
+impl<I: 'static + Send + Sync> Fw<I> {
     pub fn new(_instance: I) -> Fw<I> {
         Fw { val_types: Vec::new(), val_types_by_name: HashMap::new(), dep_types: Vec::new(), dep_types_by_name: HashMap::new() }
     }
@@ -499,7 +519,7 @@ impl<I: 'static> Fw<I> {
         };
         val_type
     }
-    pub fn reg_dep_type(&mut self, name: String, base: Option<DepType<I>>, ctor: Option<Box<Fn(&Arc<DepObj<I>>, &Fw<I>) + Send>>) -> DepType<I> {
+    pub fn reg_dep_type(&mut self, name: String, base: Option<DepType<I>>, ctor: Option<Box<Fn(&DepObj<I>, &Fw<I>) + Send>>) -> DepType<I> {
         self.dep_types.push(DepTypeDesc {
             base: base, name: name, props: Vec::new(), props_by_name: HashMap::new(), prop_class: HashMap::new(),
             ctor: ctor
@@ -550,7 +570,7 @@ impl<I: 'static> Fw<I> {
         if class.def_val.is_some() { panic!("Default value is registered already."); }
         replace(&mut class.def_val, Some(def_val));
     }
-    pub fn on_changed(&mut self, dep_type: DepType<I>, dep_prop: DepProp<I>, callback: Box<Fn(&Arc<DepObj<I>>, &Obj<I>, &Obj<I>, &Fw<I>) + Send>) {
+    pub fn on_changed(&mut self, dep_type: DepType<I>, dep_prop: DepProp<I>, callback: Box<Fn(&DepObj<I>, &Obj<I>, &Fw<I>) + Send>) {
         assert_dep_prop_target(dep_prop, dep_type, self);
         let mut class = self.dep_prop_class(dep_type, dep_prop);
         class.on_changed.push(callback);
@@ -581,7 +601,7 @@ mod tests {
     pub use fw::Type::Val as Type_Val;
 
     struct StrValTypeDesc { }
-    impl<I> ValTypeDesc<I> for StrValTypeDesc {
+    impl<I : Send + Sync> ValTypeDesc<I> for StrValTypeDesc {
         fn name(&self) -> &str { &"str" }
         fn parse(&self, type_: fw::ValType<I>, s: &str) -> Option<Arc<fw::Val<I>>> {
             Some(type_.box_(String::from(s)))
